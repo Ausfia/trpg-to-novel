@@ -145,6 +145,83 @@ def _write_env(env: dict[str, str], stage_cfg: dict[str, dict[str, str]]) -> Non
 
 
 # ---------------------------------------------------------------------------
+# 模型列表拉取（공通辅助）
+# ---------------------------------------------------------------------------
+
+
+def _fetch_model_list(api_key: str, base_url: str) -> list[str]:
+    """GET /v1/models，返回按名称排序的 model ID 列表。"""
+    from trpg2novel.llm.client import make_client
+    client = make_client(api_key, base_url)
+    resp = client.models.list()
+    return sorted(m.id for m in resp.data)
+
+
+def _model_picker_widget(
+    fetch_key: str,
+    model_input_key: str,
+    current_model: str,
+    api_key: str,
+    base_url: str,
+) -> str:
+    """渲染"获取模型列表 → 下拉选择 / 手动输入"控件，返回最终模型名称。
+
+    fetch_key         — session_state 缓存键前缀（每个调用点唯一）
+    model_input_key   — text_input 的 key（与外层保持一致，保证 session_state 延续）
+    current_model     — 当前已保存值（作为 text_input 的初始值）
+    api_key/base_url  — 拉取列表所用凭据（读取用户当前输入，无需保存后才能拉取）
+    """
+    sk_mlist = f"_fetched_models_{fetch_key}"
+
+    fetch_col, _ = st.columns([1, 2])
+    with fetch_col:
+        if st.button(
+            "↓ 获取模型列表",
+            key=f"_btn_fetch_models_{fetch_key}",
+            use_container_width=True,
+            help="使用上方填写的 API Key + Base URL 获取可用模型",
+        ):
+            if api_key.strip() and base_url.strip():
+                with st.spinner("获取中…"):
+                    try:
+                        st.session_state[sk_mlist] = _fetch_model_list(api_key, base_url)
+                    except Exception as exc:
+                        st.session_state[sk_mlist] = []
+                        st.error(f"获取失败：{exc}")
+            else:
+                st.warning("请先填写 API Key 和 Base URL")
+
+    fetched: list[str] = st.session_state.get(sk_mlist, [])
+    if fetched:
+        options = fetched + ["〔手动输入〕"]
+        cur_idx = fetched.index(current_model) if current_model in fetched else len(fetched)
+        picked = st.selectbox(
+            "model_sel",
+            options,
+            index=min(cur_idx, len(options) - 1),
+            key=f"_sel_model_{fetch_key}",
+            label_visibility="collapsed",
+        )
+        if picked == "〔手动输入〕":
+            return st.text_input(
+                "model_input",
+                value=current_model,
+                key=model_input_key,
+                label_visibility="collapsed",
+            )
+        # 写回 session_state，让 text_input 在 fetched 列表消失后仍能保留所选值
+        st.session_state[model_input_key] = picked
+        return picked
+    else:
+        return st.text_input(
+            "model_input",
+            value=current_model,
+            key=model_input_key,
+            label_visibility="collapsed",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Campaign 辅助
 # ---------------------------------------------------------------------------
 
@@ -280,10 +357,13 @@ def _sidebar():
                 value=_stage_value(env, stage, "base_url"),
                 key=f"cfg_{stage}_base_url",
             )
-            model = st.text_input(
-                "Model",
-                value=_stage_value(env, stage, "model"),
-                key=f"cfg_{stage}_model",
+            st.markdown("**Model**")
+            model = _model_picker_widget(
+                fetch_key=stage,
+                model_input_key=f"cfg_{stage}_model",
+                current_model=_stage_value(env, stage, "model"),
+                api_key=api_key,
+                base_url=base_url,
             )
             new_cfg[stage] = {"api_key": api_key, "base_url": base_url, "model": model}
 
@@ -516,38 +596,70 @@ def _tab_pipeline(camp: Campaign):
                     f"- chunk {c.index + 1}：`{c.start_ts}` → `{c.end_ts}`（{c.line_count} 行）"
                 )
 
-        # 落盘按钮
-        save_cols = st.columns(2)
+        # ---- 写入方式 ----
+        existing_sids_for_upload = [p.stem for p in sorted(camp.raw_logs_dir.glob("*.md"))]
+        write_mode = st.radio(
+            "写入方式",
+            ["追加（新场次）", "覆盖已有场次"],
+            horizontal=True,
+            key="upload_write_mode",
+            help="覆盖模式：所选场次的 parse/classify/segment 派生文件将一并清除，需重新处理。",
+        )
+
+        overwrite_start_num: int | None = None
+        if write_mode == "覆盖已有场次":
+            if not existing_sids_for_upload:
+                st.info("暂无已有场次，将自动追加。")
+            else:
+                ow_sid = st.selectbox("从哪个场次开始覆盖", existing_sids_for_upload, key="upload_overwrite_sid")
+                m_ow = re.search(r"\d+", ow_sid)
+                overwrite_start_num = int(m_ow.group()) if m_ow else 1
+                if len(chunks) > 1:
+                    preview = ", ".join(f"s{overwrite_start_num + i:02d}" for i in range(len(chunks)))
+                    st.caption(f"将覆盖：{preview}，并清除对应派生文件")
+                else:
+                    st.caption(f"将覆盖：s{overwrite_start_num:02d}，并清除其派生文件")
+
         start_n = len(camp.list_raw_logs()) + 1
+        is_overwrite = write_mode == "覆盖已有场次" and overwrite_start_num is not None
+        effective_start = overwrite_start_num if is_overwrite else start_n
+
+        def _clear_derived(sid: str) -> None:
+            for suf in (".events.json", ".tagged.json", ".scenes.json"):
+                p = camp.parsed_dir / f"{sid}{suf}"
+                if p.exists():
+                    p.unlink()
+
+        save_cols = st.columns(2)
 
         with save_cols[0]:
             if len(chunks) > 1:
-                label = f"接受切分：写入 s{start_n:02d} ~ s{start_n + len(chunks) - 1:02d}"
+                end_num = effective_start + len(chunks) - 1
+                label = f"{'覆盖' if is_overwrite else '追加'}：s{effective_start:02d} ~ s{end_num:02d}"
             else:
-                label = f"作为单场写入 s{start_n:02d}.md"
+                label = f"{'覆盖写入' if is_overwrite else '写入'} s{effective_start:02d}.md"
             if st.button(label, use_container_width=True, key="btn_accept_split"):
                 camp.raw_logs_dir.mkdir(parents=True, exist_ok=True)
                 written = []
                 for c in chunks:
-                    sid = f"s{start_n + c.index:02d}"
-                    out = camp.raw_logs_dir / f"{sid}.md"
-                    out.write_text(c.text, encoding="utf-8")
-                    written.append(out.name)
-                st.success(f"已写入 {len(written)} 份：{', '.join(written)}")
+                    sid = f"s{effective_start + c.index:02d}"
+                    (camp.raw_logs_dir / f"{sid}.md").write_text(c.text, encoding="utf-8")
+                    written.append(f"{sid}.md")
+                    if is_overwrite:
+                        _clear_derived(sid)
+                st.success(f"已{'覆盖' if is_overwrite else '写入'} {len(written)} 份：{', '.join(written)}")
                 st.cache_data.clear()
 
         with save_cols[1]:
             if len(chunks) > 1:
-                if st.button(
-                    f"忽略切分：整份作为单场 s{start_n:02d}.md",
-                    use_container_width=True,
-                    key="btn_force_single",
-                ):
+                label2 = f"忽略切分：整份{'覆盖' if is_overwrite else '写入'} s{effective_start:02d}.md"
+                if st.button(label2, use_container_width=True, key="btn_force_single"):
                     camp.raw_logs_dir.mkdir(parents=True, exist_ok=True)
-                    sid = f"s{start_n:02d}"
-                    out = camp.raw_logs_dir / f"{sid}.md"
-                    out.write_text(text, encoding="utf-8")
-                    st.success(f"已作为单场写入：{out.name}")
+                    sid = f"s{effective_start:02d}"
+                    (camp.raw_logs_dir / f"{sid}.md").write_text(text, encoding="utf-8")
+                    if is_overwrite:
+                        _clear_derived(sid)
+                    st.success(f"已{'覆盖' if is_overwrite else ''}写入：{sid}.md")
                     st.cache_data.clear()
 
     # ---- 场次选择 ----
@@ -559,7 +671,39 @@ def _tab_pipeline(camp: Campaign):
         st.warning(f"{camp.id}/raw_logs/ 下暂无 .md 文件，请先上传。")
         return
 
-    selected_sid = st.selectbox("选择场次", all_sids_from_md, key="pipe_sel_sid")
+    sel_col, del_col = st.columns([4, 1])
+    with sel_col:
+        selected_sid = st.selectbox("选择场次", all_sids_from_md, key="pipe_sel_sid")
+    with del_col:
+        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        if st.button("🗑 删除", key="btn_del_session_init", use_container_width=True,
+                     help="删除原始日志及全部派生文件（events / tagged / scenes）"):
+            st.session_state["del_confirm_sid"] = selected_sid
+
+    if st.session_state.get("del_confirm_sid") == selected_sid:
+        st.warning(
+            f"⚠ 即将永久删除 `{selected_sid}` 的原始日志及其 events / tagged / scenes 文件，不可撤销。"
+        )
+        cc1, cc2, _ = st.columns([1, 1, 3])
+        if cc1.button("确认删除", type="primary", key="btn_del_confirm"):
+            deleted = []
+            md_path = camp.raw_logs_dir / f"{selected_sid}.md"
+            if md_path.exists():
+                md_path.unlink()
+                deleted.append(md_path.name)
+            for suf in (".events.json", ".tagged.json", ".scenes.json"):
+                p = camp.parsed_dir / f"{selected_sid}{suf}"
+                if p.exists():
+                    p.unlink()
+                    deleted.append(p.name)
+            st.session_state.pop("del_confirm_sid", None)
+            st.cache_data.clear()
+            st.success(f"已删除：{', '.join(deleted) if deleted else '（无相关文件）'}")
+            st.rerun()
+        if cc2.button("取消", key="btn_del_cancel"):
+            st.session_state.pop("del_confirm_sid", None)
+            st.rerun()
+
     out_ph = st.empty()
 
     btn_col1, btn_col2, btn_col3 = st.columns(3)
@@ -808,7 +952,7 @@ def _tab_review(camp: Campaign):
     sessions = _list_sessions(camp)
     chapters = _list_chapters(camp)
 
-    ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
+    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 3, 1, 1])
     with ctrl1:
         if sessions:
             sel_session = st.selectbox("场次", sessions, key="rev_session")
@@ -824,8 +968,40 @@ def _tab_review(camp: Campaign):
             st.info("暂无章节草稿")
             sel_chap = None
     with ctrl3:
+        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        if chapters and st.button("🗑 删除", key="btn_del_chap_init", use_container_width=True,
+                                   help="删除该章节的草稿、修订稿、润色稿、对齐文件"):
+            st.session_state["del_confirm_chap"] = sel_chap_name
+    with ctrl4:
+        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
         if st.button("刷新", use_container_width=True, key="rev_refresh"):
             st.cache_data.clear()
+            st.rerun()
+
+    if chapters and st.session_state.get("del_confirm_chap") == sel_chap_name:
+        chap_path = camp.chapters_dir / sel_chap_name
+        base_stem = chap_path.stem.replace("_draft", "")
+        related = [
+            chap_path,
+            chap_path.with_name(chap_path.name.replace("_draft", "_revised")),
+            chap_path.with_name(base_stem + "_polished.md"),
+            chap_path.with_name(base_stem + "_align.json"),
+        ]
+        existing_related = [p for p in related if p.exists()]
+        names_str = "、".join(p.name for p in existing_related) if existing_related else sel_chap_name
+        st.warning(f"⚠ 即将删除：{names_str}，不可撤销。")
+        dc1, dc2, _ = st.columns([1, 1, 4])
+        if dc1.button("确认删除", type="primary", key="btn_del_chap_confirm"):
+            deleted = []
+            for p in existing_related:
+                p.unlink()
+                deleted.append(p.name)
+            st.session_state.pop("del_confirm_chap", None)
+            st.cache_data.clear()
+            st.success(f"已删除：{', '.join(deleted) if deleted else '（无相关文件）'}")
+            st.rerun()
+        if dc2.button("取消", key="btn_del_chap_cancel"):
+            st.session_state.pop("del_confirm_chap", None)
             st.rerun()
 
     # Align 按钮与状态
@@ -1139,33 +1315,39 @@ def _tab_kb(camp: Campaign):
     # ---- Embedding 配置 ----
     st.markdown("#### Embedding 配置")
     cfg = load_kb_config(camp.kb_config_yaml)
-    with st.form("kb_cfg_form"):
-        c1, c2 = st.columns(2)
-        api_key = c1.text_input("API Key", value=cfg.api_key, type="password")
-        base_url = c2.text_input("Base URL", value=cfg.base_url)
-        c3, c4, c5 = st.columns(3)
-        model = c3.text_input("Embedding 模型", value=cfg.model, help="如 text-embedding-3-small / bge-large-zh")
-        dim = c4.number_input("向量维度", value=cfg.dim, min_value=64, max_value=4096)
-        top_k = c5.number_input("检索 top-K", value=cfg.top_k, min_value=1, max_value=20)
-        c6, c7 = st.columns(2)
-        chunk_size = c6.number_input("分块大小（字符）", value=cfg.chunk_size, min_value=100, max_value=2000)
-        chunk_overlap = c7.number_input("分块重叠（字符）", value=cfg.chunk_overlap, min_value=0, max_value=500)
-        min_score = st.slider("最小相似度阈值", min_value=0.0, max_value=1.0, value=float(cfg.min_score), step=0.05)
+    c1, c2 = st.columns(2)
+    kb_api_key = c1.text_input("API Key", value=cfg.api_key, type="password", key=f"kb_api_{camp.id}")
+    kb_base_url = c2.text_input("Base URL", value=cfg.base_url, key=f"kb_base_url_{camp.id}")
+    st.markdown("**Embedding 模型**")
+    kb_model = _model_picker_widget(
+        fetch_key=f"kb_{camp.id}",
+        model_input_key=f"kb_model_{camp.id}",
+        current_model=cfg.model,
+        api_key=kb_api_key,
+        base_url=kb_base_url,
+    )
+    c4, c5 = st.columns(2)
+    kb_dim = c4.number_input("向量维度", value=cfg.dim, min_value=64, max_value=4096, key=f"kb_dim_{camp.id}")
+    kb_top_k = c5.number_input("检索 top-K", value=cfg.top_k, min_value=1, max_value=20, key=f"kb_top_k_{camp.id}")
+    c6, c7 = st.columns(2)
+    kb_chunk_size = c6.number_input("分块大小（字符）", value=cfg.chunk_size, min_value=100, max_value=2000, key=f"kb_chunk_{camp.id}")
+    kb_chunk_overlap = c7.number_input("分块重叠（字符）", value=cfg.chunk_overlap, min_value=0, max_value=500, key=f"kb_overlap_{camp.id}")
+    kb_min_score = st.slider("最小相似度阈值", min_value=0.0, max_value=1.0, value=float(cfg.min_score), step=0.05, key=f"kb_score_{camp.id}")
 
-        if st.form_submit_button("保存配置", type="primary"):
-            new_cfg = KBConfig(
-                api_key=api_key.strip(),
-                base_url=base_url.strip(),
-                model=model.strip(),
-                dim=int(dim),
-                chunk_size=int(chunk_size),
-                chunk_overlap=int(chunk_overlap),
-                top_k=int(top_k),
-                min_score=float(min_score),
-            )
-            save_kb_config(new_cfg, camp.kb_config_yaml)
-            cfg = new_cfg
-            st.success("已保存 kb_config.yaml")
+    if st.button("保存配置", type="primary", key=f"kb_cfg_save_{camp.id}"):
+        new_cfg = KBConfig(
+            api_key=kb_api_key.strip(),
+            base_url=kb_base_url.strip(),
+            model=kb_model.strip(),
+            dim=int(kb_dim),
+            chunk_size=int(kb_chunk_size),
+            chunk_overlap=int(kb_chunk_overlap),
+            top_k=int(kb_top_k),
+            min_score=float(kb_min_score),
+        )
+        save_kb_config(new_cfg, camp.kb_config_yaml)
+        cfg = new_cfg
+        st.success("已保存 kb_config.yaml")
 
     st.divider()
 

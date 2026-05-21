@@ -1,8 +1,8 @@
 embedding:
   api_key: sk-iyrwnnulxwdaeycncotsanthasxgmncutnscvhjmruvvcabv
-  base_url: https://api.siliconflow.cn/v1/embeddings
+  base_url: https://api.siliconflow.cn/v1
   model: BAAI/bge-m3
-  dim: 1536
+  dim: 1024
 chunk:
   size: 400
   overlap: 80
