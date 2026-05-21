@@ -1,7 +1,7 @@
 """统一配置：从环境变量读取 LLM 设置，以及项目层路径。
 
 v2 变更：
-- LLM 配置改为 5 阶段独立（detect / align / draft / polish / review），
+- LLM 配置改为 4 阶段独立（detect / draft / polish / review），
   每阶段各自一份 api_key + base_url + model。
 - 团相关路径（raw_logs / parsed / chapters / ...）改由 ``trpg2novel.campaign.Campaign`` 提供。
   下面的 ``RAW_LOG_DIR`` 等常量仍存在，但已 **弃用**：
@@ -46,12 +46,11 @@ META_DIR = _DEFAULT_CAMPAIGN_ROOT
 # LLM 配置：5 阶段独立
 # ---------------------------------------------------------------------------
 
-STAGE_NAMES = ("detect", "align", "draft", "polish", "review")
+STAGE_NAMES = ("detect", "draft", "polish", "review")
 
-# 默认值（按阶段推荐：检测/对齐/审稿用便宜模型；起草/润色用强模型）
+# 默认值（按阶段推荐：检测/审稿用便宜模型；起草/润色用强模型）
 _STAGE_DEFAULTS = {
     "detect": "deepseek-chat",
-    "align": "deepseek-chat",
     "draft": "deepseek-reasoner",
     "polish": "deepseek-reasoner",
     "review": "deepseek-chat",
@@ -59,7 +58,6 @@ _STAGE_DEFAULTS = {
 
 _LEGACY_MODEL_ENV = {
     "detect": "STAGE_MODEL_CHAPTER_DETECT",
-    "align": "STAGE_MODEL_ALIGN",
     "draft": "STAGE_MODEL_DRAFT",
     "polish": "STAGE_MODEL_POLISH",
     "review": "STAGE_MODEL_REVIEW",
@@ -77,10 +75,9 @@ class StageLLMConfig:
 
 @dataclass(frozen=True)
 class LLMSettings:
-    """5 阶段独立的 LLM 设置。"""
+    """4 阶段独立的 LLM 设置。"""
 
     detect: StageLLMConfig
-    align: StageLLMConfig
     draft: StageLLMConfig
     polish: StageLLMConfig
     review: StageLLMConfig
@@ -137,7 +134,6 @@ def _stage_env(stage: str) -> StageLLMConfig:
 def load_llm_settings() -> LLMSettings:
     return LLMSettings(
         detect=_stage_env("detect"),
-        align=_stage_env("align"),
         draft=_stage_env("draft"),
         polish=_stage_env("polish"),
         review=_stage_env("review"),

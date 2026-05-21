@@ -40,10 +40,6 @@ from trpg2novel.narrate.chapter import (
     draft_chapter,
     save_chapter_draft,
 )
-from trpg2novel.narrate.align import (
-    align_paragraphs_to_events,
-    save_alignment,
-)
 from trpg2novel.narrate.polish import polish_chapter
 
 
@@ -352,59 +348,6 @@ def polish(chapter_file: str, last_summary: str):
 def main():
     cli()
 
-
-@cli.command()
-@click.argument("chapter_file", type=click.Path(exists=True))
-def align(chapter_file: str):
-    """[7] 把章节草稿对齐到原始事件，生成 chXX_align.json。"""
-    draft_path = Path(chapter_file)
-    # 推断涉及的 session：从 draft 文件里读 <!-- scenes: ... --> 注释
-    draft_text = draft_path.read_text(encoding="utf-8")
-    lines = draft_text.splitlines()
-    session_ids: list[str] = []
-    for line in lines:
-        if line.startswith("<!--") and "scenes:" in line:
-            import re
-            m = re.search(r"scenes:\s*([^|]+)", line)
-            if m:
-                raw_ids = [s.strip() for s in m.group(1).split(",")]
-                # s01-scene-003 → s01
-                for rid in raw_ids:
-                    sid = rid.split("-")[0]
-                    if sid and sid not in session_ids:
-                        session_ids.append(sid)
-    if not session_ids:
-        click.echo("[WARN] 无法从章节文件推断 session ID，请手动指定。", err=True)
-        return
-
-    all_scenes = []
-    all_events_by_id: dict = {}
-    for sid in session_ids:
-        _, by_id = _load_tagged(sid)
-        all_events_by_id.update(by_id)
-        scenes_path = PARSED_DIR / f"{sid}.scenes.json"
-        if not scenes_path.exists():
-            click.echo(f"[ERROR] {scenes_path} 不存在", err=True)
-            return
-        from trpg2novel.segment.scene import Scene
-        raw = json.loads(scenes_path.read_text(encoding="utf-8"))
-        all_scenes.extend([Scene(**s) for s in raw])
-
-    cfg = load_llm_settings()
-    click.echo(f"⏳ 正在对齐段落 → {len(all_scenes)} 个场景，使用模型 {cfg.align.model} …")
-    result = align_paragraphs_to_events(
-        draft_text,
-        all_scenes,
-        all_events_by_id,
-        api_key=cfg.align.api_key,
-        base_url=cfg.align.base_url,
-        model=cfg.align.model,
-    )
-    out = draft_path.with_name(draft_path.stem.replace("_draft", "") + "_align.json")
-    save_alignment(result, out)
-    mapped = sum(1 for p in result.paragraphs if p.source_event_ids)
-    click.echo(f"✓ 对齐完成：{len(result.paragraphs)} 段中 {mapped} 段有事件映射")
-    click.echo(f"  未被引用的事件：{len(result.unmapped_event_ids)} 条 → {out}")
 
 
 if __name__ == "__main__":

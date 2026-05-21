@@ -33,7 +33,6 @@ from trpg2novel.character.card_loader import (
     load_card_yaml,
 )
 from trpg2novel.config import CAMPAIGNS_DIR, SYSTEMS_DIR
-from trpg2novel.narrate.align import AlignmentResult, load_alignment
 from trpg2novel.parse.session_splitter import SessionChunk, split_by_time_gap
 
 # ---------------------------------------------------------------------------
@@ -74,7 +73,6 @@ _ENV_PATH = _ROOT / ".env"
 
 _STAGES: list[tuple[str, str]] = [
     ("detect", "断点检测"),
-    ("align", "段落对齐"),
     ("draft", "章节起草"),
     ("polish", "润色"),
     ("review", "一致性审稿"),
@@ -82,7 +80,6 @@ _STAGES: list[tuple[str, str]] = [
 
 _STAGE_MODEL_DEFAULTS = {
     "detect": "deepseek-chat",
-    "align": "deepseek-chat",
     "draft": "deepseek-reasoner",
     "polish": "deepseek-reasoner",
     "review": "deepseek-chat",
@@ -112,7 +109,6 @@ def _stage_value(env: dict[str, str], stage: str, field: str) -> str:
         return env.get("OPENAI_BASE_URL", _DEFAULT_BASE_URL)
     legacy = {
         "detect": "STAGE_MODEL_CHAPTER_DETECT",
-        "align": "STAGE_MODEL_ALIGN",
         "draft": "STAGE_MODEL_DRAFT",
         "polish": "STAGE_MODEL_POLISH",
         "review": "STAGE_MODEL_REVIEW",
@@ -125,7 +121,7 @@ def _write_env(env: dict[str, str], stage_cfg: dict[str, dict[str, str]]) -> Non
         k: v for k, v in env.items()
         if not k.startswith("LLM_") and k not in {
             "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "STAGE_MODEL_CHAPTER_DETECT", "STAGE_MODEL_ALIGN",
+            "STAGE_MODEL_CHAPTER_DETECT",
             "STAGE_MODEL_DRAFT", "STAGE_MODEL_POLISH", "STAGE_MODEL_REVIEW",
             "STAGE_MODEL_SEGMENT",
         }
@@ -829,7 +825,6 @@ def _render_scene_log(
     scenes: list[dict],
     tagged: dict[str, dict],
     scene_idx: int,
-    unmapped_ids: set[str] | None = None,
 ):
     if not scenes:
         st.info("未找到场景数据。请先完成 Segment 阶段。")
@@ -849,9 +844,6 @@ def _render_scene_log(
         visible = [s for s in segs if s["kind"] not in ("pc_ooc", "roll_cmd", "bot_state", "record_meta", "image")]
         if not visible:
             continue
-
-        # 是否被 align 标记为未采用
-        is_unmapped = unmapped_ids is not None and event_id in unmapped_ids
 
         lines = []
         for seg in visible:
@@ -875,12 +867,10 @@ def _render_scene_log(
                 lines.append(f"<span style='font-size:0.85em;color:#888'>[{label}] {text}</span>")
 
         if lines:
+            content_html = "<br>".join(lines)
             header = f"**{ev['speaker']}** `{ev['timestamp']}`"
-            if is_unmapped:
-                header += "  <span style='background:#cc0000;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.8em'>未采用</span>"
-            border = "border-left:3px solid #cc0000;padding-left:6px;" if is_unmapped else ""
             st.markdown(
-                f"<div style='{border}'>{header}  \n" + "  \n".join(lines) + "</div>",
+                f"<div>{header}  \n" + "  \n".join(lines) + "</div>",
                 unsafe_allow_html=True,
             )
 
@@ -903,8 +893,13 @@ def _render_chapter(chapter_path: Path | None, camp: Campaign):
             body_lines.append(line)
     body_text = "\n".join(body_lines)
 
+    # 提前计算 display_text（revised 优先于 draft body）
+    revised_path = chapter_path.with_name(chapter_path.name.replace("_draft", "_revised"))
+    show_revised = revised_path.exists()
+    display_text = revised_path.read_text(encoding="utf-8") if show_revised else body_text
+
     # 操作栏
-    btn1, btn2, btn3 = st.columns([2, 2, 1])
+    btn1, btn2 = st.columns([2, 3])
     with btn1:
         st.download_button(
             "下载草稿 .md",
@@ -913,34 +908,28 @@ def _render_chapter(chapter_path: Path | None, camp: Campaign):
             mime="text/markdown",
             key=f"dl_{chapter_path.name}",
         )
-
-    # 检查是否有 revised 版本
-    revised_path = chapter_path.with_name(chapter_path.name.replace("_draft", "_revised"))
-    show_revised = revised_path.exists()
     with btn2:
         if show_revised:
-            st.caption(f"已有修订版：{revised_path.name}")
-            display_text = revised_path.read_text(encoding="utf-8")
+            st.caption(f"显示修订版：{revised_path.name}")
         else:
-            display_text = body_text
-    with btn3:
-        # Align 状态
-        align_path = chapter_path.with_name(chapter_path.stem.replace("_draft", "") + "_align.json")
-        if align_path.exists():
-            st.caption("✓ 已对齐")
-        else:
-            st.caption("未对齐")
+            st.caption(f"草稿：{chapter_path.name}")
 
-    # 可编辑区域
-    edited = st.text_area(
-        "章节正文（可直接编辑，点「保存修订」落盘）",
-        value=display_text,
-        height=600,
-        key=f"edit_{chapter_path.name}",
-    )
-    if st.button("保存修订", key=f"save_{chapter_path.name}"):
-        revised_path.write_text(edited, encoding="utf-8")
-        st.success(f"已保存：{revised_path.name}")
+    # 流式渲染——不创建独立滚动框，可与左侧日志同步页面滚动
+    st.markdown(display_text)
+
+    # 折叠编辑区（需要时展开，不影响对齐视图）
+    with st.expander("✏️ 编辑草稿", expanded=False):
+        edited = st.text_area(
+            "章节正文",
+            value=display_text,
+            height=500,
+            key=f"edit_{chapter_path.name}",
+            label_visibility="collapsed",
+        )
+        if st.button("保存修订", key=f"save_{chapter_path.name}"):
+            revised_path.write_text(edited, encoding="utf-8")
+            st.success(f"已保存：{revised_path.name}")
+            st.rerun()
 
 
 def _render_state(state: dict):
@@ -1007,7 +996,6 @@ def _tab_review(camp: Campaign):
             chap_path,
             chap_path.with_name(chap_path.name.replace("_draft", "_revised")),
             chap_path.with_name(base_stem + "_polished.md"),
-            chap_path.with_name(base_stem + "_align.json"),
         ]
         existing_related = [p for p in related if p.exists()]
         names_str = "、".join(p.name for p in existing_related) if existing_related else sel_chap_name
@@ -1026,36 +1014,6 @@ def _tab_review(camp: Campaign):
             st.session_state.pop("del_confirm_chap", None)
             st.rerun()
 
-    # Align 按钮与状态
-    if sel_chap is not None:
-        align_path = sel_chap.with_name(sel_chap.stem.replace("_draft", "") + "_align.json")
-        align_result = load_alignment(align_path)
-        unmapped_ids: set[str] = set(align_result.unmapped_event_ids) if align_result else set()
-
-        align_col1, align_col2 = st.columns([3, 1])
-        with align_col1:
-            if align_result:
-                mapped = sum(1 for p in align_result.paragraphs if p.source_event_ids)
-                st.caption(
-                    f"对齐状态：{len(align_result.paragraphs)} 段，{mapped} 段有映射，"
-                    f"{len(unmapped_ids)} 条事件未被引用（红框标注）"
-                )
-            else:
-                st.caption("尚未对齐。运行 Align 后可标注未被采用的原始事件。")
-        with align_col2:
-            env = _read_env()
-            if st.button("▶ 运行对齐 (Align)", use_container_width=True, key="btn_align"):
-                with st.spinner("对齐中（调用 LLM）…"):
-                    ph = st.empty()
-                    code, _ = _run_cmd(["align", str(sel_chap)], ph, camp.id)
-                if code == 0:
-                    st.success("对齐完成，刷新页面查看标注。")
-                    st.cache_data.clear()
-                else:
-                    st.error("对齐失败，见上方输出")
-    else:
-        unmapped_ids = set()
-
     st.divider()
     left, mid, right = st.columns([2, 3, 2], gap="medium")
 
@@ -1071,7 +1029,7 @@ def _tab_review(camp: Campaign):
                 ]
                 idx = st.selectbox("场景", range(len(scenes)), format_func=lambda i: labels[i], key="rev_scene")
                 st.markdown("---")
-                _render_scene_log(scenes, tagged, idx, unmapped_ids=unmapped_ids)
+                _render_scene_log(scenes, tagged, idx)
 
     with mid:
         st.subheader("章节草稿")

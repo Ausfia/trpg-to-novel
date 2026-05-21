@@ -1,4 +1,8 @@
-"""OpenAI-compatible LLM 客户端封装（薄层，不过度封装）。"""
+"""OpenAI-compatible LLM 客户端封装（薄层，不过度封装）。
+
+适用于所有 OpenAI 兼容接口：DeepSeek、SiliconFlow、OpenRouter、自建中转站等。
+模型名称由调用方按各平台规范传入（如 OpenRouter 用 "anthropic/claude-opus-4-7"）。
+"""
 
 from __future__ import annotations
 
@@ -59,4 +63,9 @@ def chat_json(
     kwargs.setdefault("response_format", {"type": "json_object"})
     kwargs.setdefault("temperature", 0.3)
     raw = chat(client, model, messages, **kwargs)
-    return json.loads(raw)
+    # 部分模型返回 markdown 代码块包裹的 JSON，剥掉包裹
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+    return json.loads(stripped)
