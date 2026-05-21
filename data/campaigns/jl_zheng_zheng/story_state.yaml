@@ -1,0 +1,62 @@
+# 跨场次滚动剧情状态 — "巨龙僭政"
+# 最后更新：s02（样本2）处理完毕
+#
+# 格式说明：
+#   characters.<name>.alive       是否存活
+#   characters.<name>.level       当前等级
+#   characters.<name>.conditions  当前特殊状态（力竭/伤者/等）
+#   characters.<name>.notes       人工备注
+#   lore_unlocked                 玩家角色已知的设定事实
+#   world.locations               各地点当前状态
+#   world.factions                各势力事件进展
+#   session_log                   已处理的 session 列表
+
+characters:
+  雷恩:
+    alive: true
+    level: 2
+    conditions:
+      - 力竭-2（每长休减1）
+    notes: s01战死，s02经牧师复活术复活。复活后升至2级。
+  丹德莱:
+    alive: true
+    level: 2
+    conditions: []
+    notes: ''
+  比阿特丽丝:
+    alive: true
+    level: 2
+    conditions: []
+    notes: ''
+  艾尔莉洁:
+    alive: true
+    level: 2
+    conditions: []
+    notes: ''
+  诺菲雅:
+    alive: true
+    level: 2
+    conditions: []
+    notes: 在s02中第一次亲历同伴死亡与复活，留有"凡人会死后起死回生"的新认知。
+  泰洛尔:
+    alive: true
+    level: 2
+    conditions: []
+    notes: s02单挑兰德卓萨·青怒，落败但成功救回人质。
+
+world:
+  locations:
+    至绿镇: 受龙巫教突袭后基本完整，被队伍守住。楼堡防线成功。
+  factions:
+    龙巫教: 兰德卓萨·青怒已现身，s02挑衅决斗后撤退，卷走1000gp物资。
+    龙巫教·兰德卓萨青怒: 已与泰洛尔发生单挑，结果对方领走人质撤退。
+
+lore_unlocked:
+  - 凡人会死后起死回生（牧师复活术，需施法者使用高环法术位）
+  - 至绿镇位于剑湾南部，由半身人女游荡者建立，卡斯特兰任职女王
+  - 雇主尼莫是本次任务的委托人
+  - 在死亡豁免规则下，HP归零不一定立即死亡（三次失败才算真正死亡）
+
+session_log:
+  - s01
+  - s02

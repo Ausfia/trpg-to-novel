@@ -1,0 +1,128 @@
+# DnD 5e 人物卡表单 schema。
+#
+# WebUI 据此渲染表单字段（标签/类型/占位提示/是否必填等）。
+# 字段顺序 = 表单渲染顺序。
+
+system: dnd5e
+
+sections:
+  - title: 基本信息
+    fields:
+      - key: name
+        label: 角色名
+        type: text
+        required: true
+        placeholder: "诺菲雅"
+        help: "与日志中说话人完全一致的名字"
+
+      - key: player_handle
+        label: 玩家 handle（可选）
+        type: text
+        required: false
+        placeholder: "诺菲雅"
+        help: "若 handle 与角色名相同可留空"
+
+      - key: race
+        label: 种族
+        type: text
+        required: false
+        placeholder: "星界精灵"
+
+      - key: class
+        label: 职业
+        type: text
+        required: false
+        placeholder: "法师"
+
+      - key: age
+        label: 年龄
+        type: text
+        required: false
+        placeholder: "345"
+
+      - key: gender
+        label: 性别
+        type: text
+        required: false
+        placeholder: "女"
+
+      - key: homeland
+        label: 故乡
+        type: text
+        required: false
+        placeholder: "星界"
+
+  - title: 外貌与气质
+    fields:
+      - key: appearance
+        label: 外貌描述
+        type: textarea
+        height: 120
+        required: false
+        placeholder: "淡灰色长发束高马尾，银蓝瞳色，眼底闪烁细碎星光……"
+
+      - key: personality
+        label: 个性
+        type: textarea
+        height: 80
+        required: false
+        placeholder: "冷静克制，偶有孩子气的惊奇"
+
+      - key: ideal
+        label: 理念
+        type: text
+        required: false
+        placeholder: "记录一切，不偏不倚"
+
+      - key: bond
+        label: 羁绊
+        type: text
+        required: false
+        placeholder: ""
+
+      - key: flaw
+        label: 缺陷
+        type: text
+        required: false
+        placeholder: ""
+
+  - title: 背景故事
+    fields:
+      - key: background_story
+        label: 背景故事
+        type: textarea
+        height: 200
+        required: false
+        placeholder: "（在此写角色的来历、动机、与团队结缘的经过……）"
+
+  - title: 关键特征（注入 prompt 的核心）
+    description: |
+      用 6–10 条简短陈述概括对叙事最重要的事实。
+      这些条目会直接注入章节起草 prompt，决定 AI 如何描写你的角色。
+      比"背景故事"更重要——请认真填写。
+    fields:
+      - key: key_traits
+        label: 关键特征（每行一条）
+        type: list
+        required: false
+        placeholder:
+          - "星界精灵，来自星光位面"
+          - '自任"观察者"，记录短暂炽热的瞬间'
+          - "主动踏上费伦旅途寻求「时间流逝」"
+
+      - key: voice_examples
+        label: 台词风格样例（可选，每行一句）
+        type: list
+        required: false
+        placeholder:
+          - "这便是死亡，对吗"
+          - "又学到了新的常识"
+
+  - title: 其他
+    fields:
+      - key: absent_default
+        label: 默认缺席
+        type: checkbox
+        required: false
+        default: false
+        help: "若该角色经常缺席，勾选后章节起草会自动交代其去向"

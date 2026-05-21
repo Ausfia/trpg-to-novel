@@ -1,0 +1,31 @@
+# 全局 PC 名单（跨场次稳定）。每个 PC 一个条目，记录别名/玩家信息。
+# 跑团时玩家在骰娘里的 handle 可能不同；这里只记录 PC 名（与日志 speaker 一致）。
+
+players:
+  - name: 雷恩
+    role: pc
+    aliases: []
+  - name: 丹德莱
+    role: pc
+    aliases: []
+  - name: 比阿特丽丝
+    role: pc
+    aliases: []
+  - name: 艾尔莉洁
+    role: pc
+    aliases: []
+  - name: 诺菲雅
+    role: pc
+    aliases: []
+    user_is: true  # 用户本人扮演者
+  - name: 泰洛尔
+    role: pc
+    aliases: []
+
+dm:
+  handle: 狗dm
+
+# 已知骰娘 handle（各场跑团使用其中一个，会变）
+known_bots:
+  - 二阶堂希罗（请看标签❗
+  - 青叶摩卡

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Env / secrets
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 项目运行产物（保留目录结构但忽略实际内容；用 .gitkeep 占位）
+data/parsed/*
+!data/parsed/.gitkeep
+data/pending/*
+!data/pending/.gitkeep
+data/chapters/*
+!data/chapters/.gitkeep
+
+# 用户原始日志默认不入库（个人跑团记录，避免无意公开）
+data/raw_logs/*
+!data/raw_logs/.gitkeep
+!data/raw_logs/README.md
+
+# 人物卡同理
+data/character_cards/*
+!data/character_cards/.gitkeep
+!data/character_cards/README.md

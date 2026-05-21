@@ -1,0 +1,22 @@
+## 章节正文（共 {{ paragraph_count }} 段）
+
+请注意：段落按空行分隔，index 从 0 计数。
+
+```
+{{ draft_text }}
+```
+
+---
+
+## 原始素材（带事件 ID 前缀）
+
+格式：`[e:<event_id>] [角色/来源] 内容`
+
+```
+{{ feed_text_with_ids }}
+```
+
+---
+
+现在，请输出每个段落对应的 `source_event_ids`，以及完全未被引用的 `unmapped_event_ids`。
+记住：只输出 JSON，不添加任何注释或代码块标记。
