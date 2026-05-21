@@ -630,6 +630,26 @@ def _tab_pipeline(camp: Campaign):
                 if p.exists():
                     p.unlink()
 
+        def _write_session_yaml(sid: str) -> None:
+            """写 sXX.yaml（已存在则跳过，保留手动配置）。"""
+            yaml_path = camp.raw_logs_dir / f"{sid}.yaml"
+            if yaml_path.exists():
+                return
+            try:
+                from trpg2novel.session_loader import load_players as _lp
+                pc = _lp(camp.players_yaml)
+                data = {
+                    "session_id": sid,
+                    "dm_handle": pc.dm_handle,
+                    "bot_handles": pc.known_bots,
+                    "absent_players": [],
+                }
+            except Exception:
+                data = {"session_id": sid, "dm_handle": "", "bot_handles": [], "absent_players": []}
+            yaml_path.write_text(
+                yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            )
+
         save_cols = st.columns(2)
 
         with save_cols[0]:
@@ -644,6 +664,7 @@ def _tab_pipeline(camp: Campaign):
                 for c in chunks:
                     sid = f"s{effective_start + c.index:02d}"
                     (camp.raw_logs_dir / f"{sid}.md").write_text(c.text, encoding="utf-8")
+                    _write_session_yaml(sid)
                     written.append(f"{sid}.md")
                     if is_overwrite:
                         _clear_derived(sid)
@@ -657,6 +678,7 @@ def _tab_pipeline(camp: Campaign):
                     camp.raw_logs_dir.mkdir(parents=True, exist_ok=True)
                     sid = f"s{effective_start:02d}"
                     (camp.raw_logs_dir / f"{sid}.md").write_text(text, encoding="utf-8")
+                    _write_session_yaml(sid)
                     if is_overwrite:
                         _clear_derived(sid)
                     st.success(f"已{'覆盖' if is_overwrite else ''}写入：{sid}.md")

@@ -25,7 +25,7 @@ from trpg2novel.config import (
     load_llm_settings,
 )
 from trpg2novel.parse import classify_events, parse_file, save_events, save_tagged
-from trpg2novel.parse.classify import TaggedEvent
+from trpg2novel.parse.classify import SessionConfig, TaggedEvent
 from trpg2novel.parse.md_loader import Event
 from trpg2novel.parse.session_splitter import SessionChunk, split_by_time_gap
 from trpg2novel.segment import save_scenes, segment_scenes
@@ -58,7 +58,17 @@ def _players_cfg():
 
 def _session_cfg(session_id: str):
     players = _players_cfg()
-    return load_session(RAW_LOG_DIR / f"{session_id}.yaml", players)
+    yaml_path = RAW_LOG_DIR / f"{session_id}.yaml"
+    if not yaml_path.exists():
+        # yaml 不存在时（如通过 UI 上传/切分生成的 md 尚未手动配置），
+        # 从 players.yaml 继承 dm/bot/pc 默认值，不崩溃。
+        return SessionConfig(
+            session_id=session_id,
+            dm_handle=players.dm_handle,
+            bot_handles=players.known_bots,
+            player_handles=players.pc_names,
+        )
+    return load_session(yaml_path, players)
 
 
 def _load_tagged(session_id: str) -> tuple[list[TaggedEvent], dict[str, TaggedEvent]]:
@@ -113,12 +123,32 @@ def split(md_path: str, gap_hours: float, campaign_id: str, dry_run: bool):
 
     camp = Campaign.load(campaign_id)
     start_n = len(camp.list_raw_logs()) + 1
+    # 预加载 players，用于生成默认 yaml
+    try:
+        players = load_players(camp.players_yaml)
+        default_dm = players.dm_handle
+        default_bots = players.known_bots
+    except Exception:
+        default_dm, default_bots = "", []
+
     for c in chunks:
         sid = f"s{start_n + c.index:02d}"
         out = camp.raw_logs_dir / f"{sid}.md"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(c.text, encoding="utf-8")
         click.echo(f"  → {out.name}")
+        # 同步写 yaml（已存在则跳过，保留手动配置）
+        yaml_out = camp.raw_logs_dir / f"{sid}.yaml"
+        if not yaml_out.exists():
+            import yaml as _yaml
+            yaml_out.write_text(
+                _yaml.safe_dump(
+                    {"session_id": sid, "dm_handle": default_dm,
+                     "bot_handles": default_bots, "absent_players": []},
+                    allow_unicode=True, sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
     click.echo(f"✓ 已写入 {len(chunks)} 份日志到 {camp.raw_logs_dir}")
 
 
