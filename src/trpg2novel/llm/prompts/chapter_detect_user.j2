@@ -2,7 +2,7 @@
 
 ## 故事背景
 故事名：{{ story_name | default("巨龙僭政") }}
-当前剧情状态摘要：
+当前人物状态：
 {% for name, cs in characters.items() %}
 - {{ name }}：等级{{ cs.level }}，{{ "存活" if cs.alive else "阵亡" }}{% if cs.conditions %}，状态[{{ cs.conditions | join("，") }}]{% endif %}
 {% endfor %}
@@ -12,13 +12,13 @@
 {{ last_chapter_summary }}
 {% endif %}
 
-## 待决定内容的场景列表（共 {{ scenes | length }} 个场景，{{ total_events }} 条事件）
+## 全部待处理场景（共 {{ scenes | length }} 个场景，{{ total_events }} 条事件）
 {% for scene in scenes %}
-- [{{ scene.id }}] {{ scene.kind }}场景，{{ scene.start_ts }}→{{ scene.end_ts }}，{{ scene.event_count }}条事件，触发原因：{{ scene.triggers | join("，") }}
+- [{{ scene.id }}] {{ scene.kind }}场景，{{ scene.start_ts }}→{{ scene.end_ts }}，{{ scene.event_count }}条事件{% if scene.triggers %}，触发：{{ scene.triggers | join("、") }}{% endif %}
 {% endfor %}
 
-## 场景内容摘要（前600字）
+## 场景内容摘要（前600字，供参考故事走向）
 {{ narrative_excerpt | truncate(600) }}
 
 ---
-请输出 JSON 判断结果（只输出 JSON，不含 markdown 代码块）：
+请在上方场景列表里找到**第一个自然章节结束点**，输出 JSON 结果（只输出 JSON，不含 markdown 代码块）：

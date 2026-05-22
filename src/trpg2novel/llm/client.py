@@ -13,7 +13,11 @@ from typing import Any
 from openai import OpenAI, APIStatusError
 
 
-def make_client(api_key: str, base_url: str) -> OpenAI:
+def make_client(
+    api_key: str,
+    base_url: str,
+) -> OpenAI:
+    """构造 OpenAI 兼容客户端。"""
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
@@ -59,13 +63,29 @@ def chat_json(
     messages: list[dict],
     **kwargs,
 ) -> dict:
-    """JSON 模式调用，返回解析后的 dict。"""
+    """JSON 模式调用，返回解析后的 dict。
+
+    先尝试带 response_format=json_object；若解析失败会把原始响应附在错误里便于排查。
+    """
     kwargs.setdefault("response_format", {"type": "json_object"})
     kwargs.setdefault("temperature", 0.3)
     raw = chat(client, model, messages, **kwargs)
-    # 部分模型返回 markdown 代码块包裹的 JSON，剥掉包裹
     stripped = raw.strip()
+    if not stripped:
+        raise ValueError(f"模型 {model} 返回了空响应（期望 JSON）")
+    # 部分模型返回 markdown 代码块包裹的 JSON，剥掉包裹
     if stripped.startswith("```"):
         lines = stripped.splitlines()
-        stripped = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-    return json.loads(stripped)
+        inner = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:]).strip()
+        if inner:
+            stripped = inner
+    if not stripped:
+        raise ValueError(f"模型 {model} 返回空 JSON 内容，原始响应：{raw!r}")
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        first200 = stripped[:200].replace("\n", "\\n")
+        raise ValueError(
+            f"模型 {model} 返回了非 JSON 内容（{exc}）\n"
+            f"响应前 200 字：{first200!r}"
+        ) from exc

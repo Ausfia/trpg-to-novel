@@ -43,6 +43,9 @@ class StoryState:
     world: WorldState = field(default_factory=WorldState)
     lore_unlocked: list[str] = field(default_factory=list)
     session_log: list[str] = field(default_factory=list)
+    # v3.1: 已入章的场景 id 与章节台账（用于自动续章 / UI 渲染）
+    processed_scene_ids: list[str] = field(default_factory=list)
+    chapter_index: list[dict] = field(default_factory=list)
 
 
 def load_state(path: Path) -> StoryState:
@@ -68,6 +71,8 @@ def load_state(path: Path) -> StoryState:
         world=world,
         lore_unlocked=list(raw.get("lore_unlocked", [])),
         session_log=list(raw.get("session_log", [])),
+        processed_scene_ids=list(raw.get("processed_scene_ids", [])),
+        chapter_index=list(raw.get("chapter_index", [])),
     )
 
 
@@ -82,6 +87,8 @@ def save_state(state: StoryState, path: Path) -> None:
         "world": asdict(state.world),
         "lore_unlocked": state.lore_unlocked,
         "session_log": state.session_log,
+        "processed_scene_ids": state.processed_scene_ids,
+        "chapter_index": state.chapter_index,
     }
     path.write_text(
         yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),

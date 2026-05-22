@@ -49,7 +49,9 @@ class CharacterCard:
     # WebUI 直接填写的叙事关键词（优先用于 prompt 注入）
     key_traits: list[str] = field(default_factory=list)
     voice_examples: list[str] = field(default_factory=list)
-    absent_default: bool = False
+    # 退出跑团标注
+    left_after_session: str | None = None  # 如 "s05"，该场次之后不再出现
+    exit_story: str | None = None           # 离场方向说明，注入 draft prompt
     # 派生（load 时自动填充）
     atomic_facts: list[str] = field(default_factory=list)
 
@@ -81,7 +83,8 @@ def load_card_yaml(yaml_path: Path) -> CharacterCard:
         languages=list(data.get("languages") or []),
         key_traits=list(data.get("key_traits") or []),
         voice_examples=list(data.get("voice_examples") or []),
-        absent_default=bool(data.get("absent_default", False)),
+        left_after_session=data.get("left_after_session") or None,
+        exit_story=data.get("exit_story") or None,
     )
     card.atomic_facts = derive_atomic_facts(card)
     return card
@@ -122,7 +125,8 @@ def card_to_dict(card: CharacterCard) -> dict:
         "background_class": card.background_class,
         "key_traits": list(card.key_traits),
         "voice_examples": list(card.voice_examples),
-        "absent_default": card.absent_default,
+        **({"left_after_session": card.left_after_session} if card.left_after_session else {}),
+        **({"exit_story": card.exit_story} if card.exit_story else {}),
     }
 
 

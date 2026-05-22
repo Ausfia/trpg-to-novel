@@ -194,6 +194,7 @@ def draft(auto_detect: bool, force: bool, session_ids: tuple, last_summary: str)
 
     all_scenes = []
     all_events_by_id: dict = {}
+    from trpg2novel.segment.scene import Scene
     for sid in session_ids:
         _, by_id = _load_tagged(sid)
         all_events_by_id.update(by_id)
@@ -201,12 +202,26 @@ def draft(auto_detect: bool, force: bool, session_ids: tuple, last_summary: str)
         if not scenes_path.exists():
             click.echo(f"[ERROR] {scenes_path} 不存在，请先运行 segment {sid}", err=True)
             sys.exit(1)
-        from trpg2novel.segment.scene import Scene
         raw = json.loads(scenes_path.read_text(encoding="utf-8"))
         all_scenes.extend([Scene(**s) for s in raw])
 
     state = load_state(META_DIR / "story_state.yaml")
+
+    # 一次性迁移：把 chapters 目录已有的 chXX_draft.md 回填到 state.chapter_index
+    _migrate_chapter_index(CHAPTERS_DIR, state)
+
+    # 过滤已入章 scene
+    processed = set(state.processed_scene_ids)
+    remaining = [s for s in all_scenes if s.id not in processed]
+    if not remaining:
+        click.echo("[INFO] 所选 session 的场景已全部入章，没有可处理的内容。")
+        return
+
     cfg = load_llm_settings()
+
+    # 若 last_summary 未传，且 state 里有上一章，自动取其 last_summary
+    if not last_summary and state.chapter_index:
+        last_summary = state.chapter_index[-1].get("last_summary", "")
 
     # 加载默认团的 worldview（pipeline 暂未带 --campaign，先用默认）
     camp = None
@@ -217,24 +232,33 @@ def draft(auto_detect: bool, force: bool, session_ids: tuple, last_summary: str)
         worldview = load_worldview("dnd5e")
 
     if not force:
-        click.echo("⏳ 正在判断章节边界…")
+        click.echo(f"⏳ 正在判断章节边界（待处理 {len(remaining)} 场）…")
         result = detect_boundary(
-            all_scenes,
+            remaining,
             all_events_by_id,
             state,
             last_summary,
-            api_key=cfg.api_key,
-            base_url=cfg.base_url,
-            model=cfg.model_chapter_detect,
+            api_key=cfg.detect.api_key,
+            base_url=cfg.detect.base_url,
+            model=cfg.detect.model,
         )
-        click.echo(f"→ 判断结果：{result.status}")
-        click.echo(f"   原因：{result.reason}")
-        if result.status != "enough_for_chapter":
-            click.echo("   提示：材料不足以成章，等下一场后重试（或使用 --force 强制生成）")
+        click.echo(f"→ 判断结果：{result.status}  原因：{result.reason}")
+        if result.status == "insufficient":
+            click.echo("   提示：场景数不足以成章，建议再处理下一场后重试（或使用 --force 强制生成）")
             return
         chapter_title = result.chapter_title_suggestion or "无题"
         focus = result.focus_characters
+        # 按 end_scene_id 截断；LLM 未返回有效 ID 时使用全部 remaining
+        end_id = (result.end_scene_id or "").strip()
+        if end_id and any(s.id == end_id for s in remaining):
+            cutoff = next(i for i, s in enumerate(remaining) if s.id == end_id) + 1
+            scenes_for_chapter = remaining[:cutoff]
+        else:
+            if end_id:
+                click.echo(f"[WARN] LLM 返回的 end_scene_id='{end_id}' 不在待处理场景中，回退使用全部 remaining")
+            scenes_for_chapter = remaining
     else:
+        scenes_for_chapter = remaining
         chapter_title = "强制生成章节"
         focus = []
         click.echo("⚡ 强制生成模式，跳过边界检测")
@@ -264,7 +288,28 @@ def draft(auto_detect: bool, force: bool, session_ids: tuple, last_summary: str)
     pc_count = len(pc_facts)
     click.echo(f"✓ 人物卡加载：{pc_count} 人（{'、'.join(pc_facts) if pc_count else '无'}）")
 
-    click.echo(f"⏳ 正在生成草稿：{chapter_title} …")
+    # 收集缺席玩家（从各场次 yaml 读取）
+    all_absent: list[str] = []
+    for sid in session_ids:
+        try:
+            cfg_sid = _session_cfg(sid)
+            all_absent.extend(cfg_sid.absent_players)
+        except Exception:
+            pass
+    all_absent = list(dict.fromkeys(all_absent))  # 去重，保持顺序
+
+    # 收集本次应安排离场的退团角色
+    retired: list[dict] = []
+    for name, c in cards.items():
+        if c.left_after_session and c.left_after_session in session_ids:
+            retired.append({"name": c.name, "exit_story": c.exit_story or ""})
+
+    if all_absent:
+        click.echo(f"✓ 缺席角色：{', '.join(all_absent)}")
+    if retired:
+        click.echo(f"✓ 退团角色（将安排离场）：{', '.join(r['name'] for r in retired)}")
+
+    click.echo(f"⏳ 正在生成草稿：{chapter_title}（{len(scenes_for_chapter)} 场）…")
     # 尝试加载 KB（若 kb_config.yaml 存在且配置了 api_key）
     kb = None
     if camp is not None:
@@ -285,26 +330,105 @@ def draft(auto_detect: bool, force: bool, session_ids: tuple, last_summary: str)
             kb = None
 
     chapter = draft_chapter(
-        all_scenes,
+        scenes_for_chapter,
         all_events_by_id,
         state,
         nofiyad_facts,
         chapter_title,
         focus,
         last_chapter_summary=last_summary,
-        api_key=cfg.api_key,
-        base_url=cfg.base_url,
-        model=cfg.model_draft,
+        absent_players=all_absent or None,
+        retired_characters=retired or None,
+        api_key=cfg.draft.api_key,
+        base_url=cfg.draft.base_url,
+        model=cfg.draft.model,
         worldview=worldview,
         pc_facts=pc_facts if pc_count > 0 else None,
         kb=kb,
     )
 
-    idx = len(list(CHAPTERS_DIR.glob("ch*.md"))) + 1
+    # 用 state.chapter_index 而不是 glob，避免并发/迁移期重号
+    idx = len(state.chapter_index) + 1
     out = CHAPTERS_DIR / f"ch{idx:02d}_draft.md"
+    # 防御：万一同名文件已存在（migration 没覆盖到），递增到空号
+    while out.exists():
+        idx += 1
+        out = CHAPTERS_DIR / f"ch{idx:02d}_draft.md"
     save_chapter_draft(chapter, out)
     words = len(chapter.draft_text)
+
+    # 更新 state
+    state.processed_scene_ids.extend([s.id for s in scenes_for_chapter])
+    state.chapter_index.append({
+        "file": out.name,
+        "title": chapter.chapter_title,
+        "scene_ids": [s.id for s in scenes_for_chapter],
+        "focus": list(chapter.focus_characters),
+        "last_summary": last_summary,
+    })
+    for sid in session_ids:
+        if sid not in state.session_log:
+            state.session_log.append(sid)
+    save_state(state, META_DIR / "story_state.yaml")
+
+    remaining_after = len(remaining) - len(scenes_for_chapter)
     click.echo(f"✓ 草稿已生成：{out}（约 {words} 字）")
+    click.echo(f"  本次入章 {len(scenes_for_chapter)} 场，剩余 {remaining_after} 场未处理")
+    if remaining_after > 0:
+        click.echo("  → 可再次运行 draft 命令生成下一章")
+
+
+def _migrate_chapter_index(chapters_dir: Path, state) -> None:
+    """把 chapters/chXX_draft.md 里没记录在 state.chapter_index 的回填进去。
+
+    解析 ch 文件首两行：'# <title>' 和 '<!-- scenes: ..., events: N, focus: ... -->'。
+    回填条目里的 scene_ids 也同步加入 state.processed_scene_ids（避免重复入章）。
+    一次性、幂等。
+    """
+    if not chapters_dir.exists():
+        return
+    recorded = {entry.get("file") for entry in state.chapter_index}
+    processed = set(state.processed_scene_ids)
+    added = 0
+    for path in sorted(chapters_dir.glob("ch*_draft.md")):
+        if path.name in recorded:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        title = ""
+        scene_ids: list[str] = []
+        focus: list[str] = []
+        for line in text.splitlines()[:6]:
+            line = line.strip()
+            if line.startswith("# ") and not title:
+                title = line[2:].strip()
+            elif line.startswith("<!--") and "scenes:" in line:
+                # 形如：<!-- scenes: s01-scene-001, s01-scene-002 | events: 12 | focus: 诺菲雅 -->
+                body = line.strip("<!- >")
+                for part in body.split("|"):
+                    k, _, v = part.partition(":")
+                    k = k.strip().lower()
+                    v = v.strip()
+                    if k == "scenes" and v:
+                        scene_ids = [x.strip() for x in v.split(",") if x.strip()]
+                    elif k == "focus" and v:
+                        focus = [x.strip() for x in v.split(",") if x.strip()]
+        state.chapter_index.append({
+            "file": path.name,
+            "title": title or path.stem,
+            "scene_ids": scene_ids,
+            "focus": focus,
+            "last_summary": "",
+        })
+        for sid in scene_ids:
+            if sid not in processed:
+                state.processed_scene_ids.append(sid)
+                processed.add(sid)
+        added += 1
+    if added:
+        click.echo(f"[migration] 已回填 {added} 个历史章节到 chapter_index")
 
 
 @cli.command()

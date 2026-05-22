@@ -80,7 +80,7 @@ def detect_boundary(
         {"role": "user", "content": user_prompt},
     ])
     return DetectionResult(
-        status=raw.get("status", "partial_arc"),
+        status=raw.get("status", "insufficient"),
         chapter_title_suggestion=raw.get("chapter_title_suggestion", ""),
         end_scene_id=raw.get("end_scene_id", ""),
         focus_characters=raw.get("focus_characters", []),
@@ -97,6 +97,7 @@ def draft_chapter(
     focus_characters: list[str],
     last_chapter_summary: str = "",
     absent_players: list[str] | None = None,
+    retired_characters: list[dict] | None = None,
     *,
     api_key: str,
     base_url: str,
@@ -142,6 +143,7 @@ def draft_chapter(
         worldview=worldview,
         characters=state.characters,
         absent_players=absent_players or [],
+        retired_characters=retired_characters or [],
         nofiyad_facts=nofiyad_facts,
         pc_facts=pc_facts or {},
         last_chapter_summary=last_chapter_summary,
