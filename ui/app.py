@@ -59,6 +59,7 @@ nav = st.navigation(
             _page("pipeline.py", title="解析流程", icon="✍️"),
             _page("review.py", title="章节审稿", icon="📖"),
             _page("polish.py", title="润色对比", icon="✨"),
+            _page("consistency.py", title="一致性检查", icon="🪞"),
         ],
         "📚 资料库": [
             _page("cards.py", title="人物卡", icon="🎭"),

@@ -42,16 +42,22 @@ class CharacterCard:
     background_story: str = ""
     # DnD 5e 字段（optional，其他系统可留空）
     race: str = ""
+    subrace: str = ""               # 亚种（如：高等精灵 / 木精灵）
     class_name: str = ""            # "class" 是 Python 保留字
+    subclass: str = ""              # 子职（如：誓约骑士 / 变形德鲁伊）
     background_class: str = ""      # 背景（遮荫者/远行者 etc.）
     background_feature: str = ""
     languages: list[str] = field(default_factory=list)
     # WebUI 直接填写的叙事关键词（优先用于 prompt 注入）
     key_traits: list[str] = field(default_factory=list)
     voice_examples: list[str] = field(default_factory=list)
+    # DM 给予玩家的额外自定义背景（可选，注入 prompt）
+    special_background: str = ""
+    # AI 识图生成的外貌描述（不在 WebUI 编辑区显示，Draft 时注入 prompt）
+    appearance_ai: str = ""
     # 退出跑团标注
-    left_after_session: str | None = None  # 如 "s05"，该场次之后不再出现
-    exit_story: str | None = None           # 离场方向说明，注入 draft prompt
+    left_after_session: str | None = None
+    exit_story: str | None = None
     # 派生（load 时自动填充）
     atomic_facts: list[str] = field(default_factory=list)
 
@@ -77,12 +83,16 @@ def load_card_yaml(yaml_path: Path) -> CharacterCard:
         flaw=data.get("flaw", ""),
         background_story=data.get("background_story", ""),
         race=data.get("race", ""),
+        subrace=data.get("subrace", ""),
         class_name=data.get("class", data.get("class_name", "")),
+        subclass=data.get("subclass", ""),
         background_class=data.get("background_class", ""),
         background_feature=data.get("background_feature", ""),
         languages=list(data.get("languages") or []),
         key_traits=list(data.get("key_traits") or []),
         voice_examples=list(data.get("voice_examples") or []),
+        special_background=data.get("special_background") or "",
+        appearance_ai=data.get("appearance_ai") or "",
         left_after_session=data.get("left_after_session") or None,
         exit_story=data.get("exit_story") or None,
     )
@@ -112,7 +122,9 @@ def card_to_dict(card: CharacterCard) -> dict:
         "name": card.name,
         "player_handle": card.player_handle,
         "race": card.race,
+        **({"subrace": card.subrace} if card.subrace else {}),
         "class": card.class_name,
+        **({"subclass": card.subclass} if card.subclass else {}),
         "age": card.age,
         "gender": card.gender,
         "homeland": card.homeland,
@@ -125,6 +137,8 @@ def card_to_dict(card: CharacterCard) -> dict:
         "background_class": card.background_class,
         "key_traits": list(card.key_traits),
         "voice_examples": list(card.voice_examples),
+        **({"special_background": card.special_background} if card.special_background else {}),
+        **({"appearance_ai": card.appearance_ai} if card.appearance_ai else {}),
         **({"left_after_session": card.left_after_session} if card.left_after_session else {}),
         **({"exit_story": card.exit_story} if card.exit_story else {}),
     }
@@ -144,9 +158,12 @@ def derive_atomic_facts(card: CharacterCard) -> list[str]:
     # 用户手写的最高优先
     if card.key_traits:
         facts = list(card.key_traits)
-        # 补充 voice_examples 作为说话风格提示
         if card.voice_examples:
             facts.append("说话风格样例：" + "；".join(f'「{v}」' for v in card.voice_examples))
+        if card.special_background:
+            facts.append("特殊背景：" + card.special_background)
+        if card.appearance_ai:
+            facts.append("外貌细节（识图补充）：" + card.appearance_ai)
         return facts
 
     # 回退：从结构化字段推导（与 v1 逻辑保持一致，dnd5e 特化）
@@ -192,6 +209,9 @@ def derive_atomic_facts(card: CharacterCard) -> list[str]:
             facts.append('将自己定位为"观察者"——记录短暂而炽热的瞬间，不愿卷入琐碎纷争')
         if "友谊" in bs or "羁绊" in bs:
             facts.append("内心深处渴望在费伦找到真正的友谊与羁绊")
+
+    if card.appearance_ai:
+        facts.append("外貌细节（识图补充）：" + card.appearance_ai)
 
     return facts
 

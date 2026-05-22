@@ -436,6 +436,7 @@ def _migrate_chapter_index(chapters_dir: Path, state) -> None:
 @click.option("--last-summary", default="", help="上一章结尾摘要（可选）")
 def polish(chapter_file: str, last_summary: str):
     """[8] 对修订稿进行 LLM 润色，生成 chXX_polished.md。"""
+    import os
     draft_path = Path(chapter_file)
     # 优先使用 revised 版本，否则用 draft
     revised_path = draft_path.with_name(draft_path.name.replace("_draft", "_revised"))
@@ -444,8 +445,10 @@ def polish(chapter_file: str, last_summary: str):
     click.echo(f"✓ 使用源文件：{source_path.name}（{len(text)} 字）")
 
     cfg = load_llm_settings()
+    camp_id = os.environ.get("DEFAULT_CAMPAIGN_ID", "jl_zheng_zheng")
+    camp = None
     try:
-        camp = Campaign.load("jl_zheng_zheng")
+        camp = Campaign.load(camp_id)
         wv = load_worldview_for_campaign(camp)
         from trpg2novel.character import load_all_cards
         cards = load_all_cards(camp.character_cards_dir)
@@ -453,6 +456,23 @@ def polish(chapter_file: str, last_summary: str):
     except Exception:
         wv = load_worldview("dnd5e")
         pc_facts = {}
+
+    # 尝试加载 KB
+    kb = None
+    if camp is not None:
+        try:
+            from trpg2novel.rag import KnowledgeBase, load_kb_config
+            kb_cfg = load_kb_config(camp.kb_config_yaml)
+            if kb_cfg.is_configured():
+                _kb = KnowledgeBase.open(camp.knowledge_base_dir, kb_cfg)
+                if _kb.count_chunks() > 0:
+                    kb = _kb
+                    click.echo(f"✓ RAG 知识库就绪：{_kb.count_chunks()} 片段")
+        except Exception as e:
+            click.echo(f"[WARN] 加载知识库失败，跳过 RAG：{e}")
+
+    # 从文件名提取章节标题
+    chapter_title = draft_path.stem.replace("_draft", "").replace("_", " ")
 
     click.echo(f"⏳ 润色中，使用模型 {cfg.polish.model} …")
     polished = polish_chapter(
@@ -463,6 +483,8 @@ def polish(chapter_file: str, last_summary: str):
         api_key=cfg.polish.api_key,
         base_url=cfg.polish.base_url,
         model=cfg.polish.model,
+        kb=kb,
+        chapter_title=chapter_title,
     )
     out = draft_path.with_name(draft_path.stem.replace("_draft", "") + "_polished.md")
     out.write_text(polished, encoding="utf-8")

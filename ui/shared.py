@@ -142,6 +142,26 @@ def write_env(env: dict[str, str], stage_cfg: dict[str, dict[str, str]]) -> None
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def read_vision_config() -> dict[str, str]:
+    """读取识图 LLM 配置（LLM_VISION_* 键）。"""
+    env = read_env()
+    return {
+        "api_key": env.get("LLM_VISION_API_KEY", ""),
+        "base_url": env.get("LLM_VISION_BASE_URL", DEFAULT_BASE_URL),
+        "model": env.get("LLM_VISION_MODEL", ""),
+    }
+
+
+def write_vision_config(api_key: str, base_url: str, model: str) -> None:
+    """写入识图 LLM 配置。"""
+    env = read_env()
+    env["LLM_VISION_API_KEY"] = api_key
+    env["LLM_VISION_BASE_URL"] = base_url
+    env["LLM_VISION_MODEL"] = model
+    lines = [f"{k}={v}" for k, v in env.items()]
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # 模型列表拉取 + 模型选择控件
 # ---------------------------------------------------------------------------

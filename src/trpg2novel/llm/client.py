@@ -89,3 +89,27 @@ def chat_json(
             f"模型 {model} 返回了非 JSON 内容（{exc}）\n"
             f"响应前 200 字：{first200!r}"
         ) from exc
+
+
+def chat_vision(
+    client: OpenAI,
+    model: str,
+    image_bytes: bytes,
+    prompt: str,
+    mime_type: str = "image/jpeg",
+    *,
+    max_tokens: int = 1200,
+) -> str:
+    """Vision call: send image (base64) + text prompt, return description string."""
+    import base64
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+            ],
+        }
+    ]
+    return chat(client, model, messages, temperature=0.5, max_tokens=max_tokens)

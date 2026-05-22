@@ -23,4 +23,14 @@
 {{ last_chapter_summary }}
 {% endif %}
 
+{% if retrieved %}
+## 世界观检索（来自知识库）
+以下片段为润色时可参考的世界观细节，确保专有名词、地名、阵营等叙述与设定保持一致：
+{% for r in retrieved %}
+**［{{ r.source }}］**
+{{ r.text }}
+
+{% endfor %}
+{% endif %}
+
 输出：直接输出润色后的完整正文，不加任何注释或说明。

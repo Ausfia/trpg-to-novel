@@ -10,8 +10,10 @@ from ui.shared import (
     STAGES,
     model_picker_widget,
     read_env,
+    read_vision_config,
     stage_value,
     write_env,
+    write_vision_config,
 )
 
 st.title("⚙️ LLM 配置")
@@ -119,6 +121,50 @@ with status_col:
         st.success(f"已配置：{'、'.join(configured_stages)}")
     if missing_stages:
         st.warning(f"未配置：{'、'.join(missing_stages)}")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 识图模型（人物卡立绘外貌识别）
+# ---------------------------------------------------------------------------
+
+st.markdown("#### 🖼️ 识图模型（人物卡立绘外貌识别）")
+st.caption("用于分析角色立绘图片，自动生成外貌描述注入起草 prompt。需要支持视觉输入（Vision）的模型，如 gpt-4o、qwen-vl-max 等。")
+
+vcfg = read_vision_config()
+v_api_key_cur = vcfg["api_key"]
+v_base_url_cur = vcfg["base_url"]
+v_model_cur = vcfg["model"]
+
+vc1, vc2 = st.columns(2)
+with vc1:
+    v_configured = bool(v_api_key_cur.strip())
+    v_status_color = "#2fa84f" if v_configured else "#e09c30"
+    v_status_text = "● 已配置" if v_configured else "○ 未配置"
+    st.markdown(
+        f'<div class="tn-card-title">🖼️ 识图模型'
+        f'<span style="font-size:11px;color:{v_status_color};margin-left:8px">{v_status_text}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    v_api_key = st.text_input("API Key", value=v_api_key_cur, type="password", key="cfg_vision_api_key", placeholder="sk-...")
+    v_base_url = st.text_input("Base URL", value=v_base_url_cur, key="cfg_vision_base_url")
+    st.markdown("**Model**")
+    v_model = model_picker_widget(
+        fetch_key="vision",
+        model_input_key="cfg_vision_model",
+        current_model=v_model_cur,
+        api_key=v_api_key,
+        base_url=v_base_url,
+    )
+
+with vc2:
+    st.markdown("")
+    st.markdown("")
+    st.info("识图模型仅在「人物卡」页点击「分析外貌」时调用，不参与章节流水线。")
+    if st.button("💾 保存识图配置", key="btn_save_vision", type="primary"):
+        write_vision_config(v_api_key.strip(), v_base_url.strip(), v_model.strip())
+        st.success("识图模型配置已保存")
 
 st.divider()
 
