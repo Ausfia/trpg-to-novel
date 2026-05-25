@@ -30,7 +30,7 @@ import yaml
 class CharacterCard:
     name: str
     # 通用字段（system-agnostic）
-    player_handle: str = ""         # 日志中发言人 handle（可选）
+    aliases: list[str] = field(default_factory=list)  # 别名（群昵称等），解析时识别
     age: str = ""
     gender: str = ""
     homeland: str = ""
@@ -58,6 +58,8 @@ class CharacterCard:
     # 退出跑团标注
     left_after_session: str | None = None
     exit_story: str | None = None
+    # 入场标注
+    first_appearance_session: str | None = None
     # 派生（load 时自动填充）
     atomic_facts: list[str] = field(default_factory=list)
 
@@ -70,9 +72,15 @@ class CharacterCard:
 def load_card_yaml(yaml_path: Path) -> CharacterCard:
     """从 YAML 文件加载人物卡（WebUI 表单填写的标准格式）。"""
     data: dict = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+
+    # 向后兼容：旧的 player_handle 字段转换为 aliases
+    aliases = list(data.get("aliases") or [])
+    if not aliases and data.get("player_handle"):
+        aliases = [data["player_handle"]]
+
     card = CharacterCard(
         name=data.get("name", yaml_path.stem),
-        player_handle=data.get("player_handle", ""),
+        aliases=aliases,
         age=str(data.get("age", "")),
         gender=data.get("gender", ""),
         homeland=data.get("homeland", ""),
@@ -95,6 +103,7 @@ def load_card_yaml(yaml_path: Path) -> CharacterCard:
         appearance_ai=data.get("appearance_ai") or "",
         left_after_session=data.get("left_after_session") or None,
         exit_story=data.get("exit_story") or None,
+        first_appearance_session=data.get("first_appearance_session") or None,
     )
     card.atomic_facts = derive_atomic_facts(card)
     return card
@@ -120,7 +129,7 @@ def card_to_dict(card: CharacterCard) -> dict:
     """把 CharacterCard 转成可序列化为 YAML 的 dict（写文件时用）。"""
     return {
         "name": card.name,
-        "player_handle": card.player_handle,
+        "aliases": list(card.aliases),
         "race": card.race,
         **({"subrace": card.subrace} if card.subrace else {}),
         "class": card.class_name,
@@ -141,6 +150,7 @@ def card_to_dict(card: CharacterCard) -> dict:
         **({"appearance_ai": card.appearance_ai} if card.appearance_ai else {}),
         **({"left_after_session": card.left_after_session} if card.left_after_session else {}),
         **({"exit_story": card.exit_story} if card.exit_story else {}),
+        **({"first_appearance_session": card.first_appearance_session} if card.first_appearance_session else {}),
     }
 
 

@@ -7,10 +7,19 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import time
 from typing import Any
 
-from openai import OpenAI, APIStatusError
+from openai import OpenAI, APIConnectionError, APIStatusError
+
+_THINK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
+
+
+def _strip_think(text: str) -> str:
+    """Remove `<think>...</think>` blocks leaked by reasoning models (e.g. DeepSeek-R1)."""
+    return _THINK_RE.sub("", text).strip()
 
 
 def make_client(
@@ -29,6 +38,7 @@ def chat(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     response_format: dict | None = None,
+    extra_body: dict | None = None,
     retries: int = 3,
     retry_delay: float = 5.0,
 ) -> str:
@@ -42,12 +52,31 @@ def chat(
         kwargs["max_tokens"] = max_tokens
     if response_format is not None:
         kwargs["response_format"] = response_format
+    merged_extra_body = _default_extra_body(client, model)
+    if extra_body:
+        merged_extra_body.update(extra_body)
+    if merged_extra_body:
+        kwargs["extra_body"] = merged_extra_body
 
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
             resp = client.chat.completions.create(**kwargs)
-            return resp.choices[0].message.content or ""
+            return _strip_think(resp.choices[0].message.content or "")
+        except APIConnectionError as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            base_url = str(getattr(client, "base_url", "") or "").rstrip("/")
+            raise RuntimeError(
+                "LLM 连接失败：无法连接到模型服务。"
+                "这通常不是模型生成问题，而是 Base URL 域名无法解析、网络/DNS 不通、代理不可用，"
+                "或服务商地址填写错误。\n"
+                f"当前 Base URL：{base_url or '未设置'}\n"
+                "请到「LLM 配置」页检查对应阶段的 Base URL、API Key、代理/网络后重试。\n"
+                f"底层错误：{e}"
+            ) from e
         except APIStatusError as e:
             last_err = e
             if e.status_code in (429, 500, 502, 503, 504):
@@ -55,6 +84,17 @@ def chat(
             else:
                 raise
     raise RuntimeError(f"LLM 调用失败（已重试 {retries} 次）: {last_err}") from last_err
+
+
+def _default_extra_body(client: OpenAI, model: str) -> dict[str, Any]:
+    """Provider-specific defaults for OpenAI-compatible APIs."""
+    base_url = str(getattr(client, "base_url", "") or "").lower()
+    model_l = (model or "").lower()
+    if "api.deepseek.com" in base_url and model_l.startswith("deepseek-v4"):
+        mode = os.environ.get("LLM_DEEPSEEK_THINKING", "disabled").strip().lower()
+        if mode in {"enabled", "disabled"}:
+            return {"thinking": {"type": mode}}
+    return {}
 
 
 def chat_json(

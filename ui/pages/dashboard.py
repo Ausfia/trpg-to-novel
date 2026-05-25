@@ -20,6 +20,8 @@ from ui.shared import (
     STAGES,
     STAGE_ICONS,
     badge,
+    chapter_stage_paths,
+    chapter_status,
     list_chapters,
     list_raw_sessions,
     list_sessions,
@@ -56,10 +58,16 @@ for sid in seg_sids:
 
 chapter_files = list_chapters(camp)
 polished_count = 0
+reviewed_count = 0
+final_count = 0
 for chap in chapter_files:
-    polished = chap.with_name(chap.stem.replace("_draft", "") + "_polished.md")
-    if polished.exists():
+    paths = chapter_stage_paths(chap)
+    if paths["polished"].exists():
         polished_count += 1
+    if paths["reviewed"].exists():
+        reviewed_count += 1
+    if chapter_status(chap, state)["stage"] == "final":
+        final_count += 1
 
 pending_scenes = max(0, total_scenes - len(processed_ids))
 
@@ -84,7 +92,7 @@ with m3:
 
 with m4:
     rate = (polished_count / len(chapter_files) * 100) if chapter_files else 0
-    hint = f"占比 {rate:.0f}%" if chapter_files else "—"
+    hint = f"占比 {rate:.0f}% · 已审查 {reviewed_count} · 已成稿 {final_count}" if chapter_files else "—"
     st.markdown(metric_html("已润色章节", str(polished_count), hint, kind="success"), unsafe_allow_html=True)
 
 
@@ -143,17 +151,15 @@ with left_col:
             title = entry.get("title") or chap.stem
             scene_n = len(entry.get("scene_ids") or [])
             focus = "、".join(entry.get("focus") or [])
-            polished_path = chap.with_name(chap.stem.replace("_draft", "") + "_polished.md")
-            revised_path = chap.with_name(chap.name.replace("_draft", "_revised"))
-            if polished_path.exists():
-                status_badge = badge("已润色", "ok")
-                words = len(polished_path.read_text(encoding="utf-8"))
-            elif revised_path.exists():
-                status_badge = badge("待润色", "warn")
-                words = len(revised_path.read_text(encoding="utf-8"))
-            else:
-                status_badge = badge("草稿", "info")
-                words = len(chap.read_text(encoding="utf-8"))
+            paths = chapter_stage_paths(chap)
+            status = chapter_status(chap, state)
+            status_badge = badge(status["label"], status["kind"])
+            display_path = chap.parent / status["path"]
+            if not display_path.exists():
+                display_path = paths["reviewed"] if paths["reviewed"].exists() else paths["polished"]
+            if not display_path.exists():
+                display_path = paths["revised"] if paths["revised"].exists() else paths["draft"]
+            words = len(display_path.read_text(encoding="utf-8"))
             meta_bits = [f"{scene_n} 场" if scene_n else "—"]
             if focus:
                 meta_bits.append(f"焦点：{focus}")

@@ -6,13 +6,16 @@ import streamlit as st
 
 from ui.shared import (
     DEFAULT_BASE_URL,
+    POLISH_SUBSTAGES,
     STAGE_ICONS,
     STAGES,
     model_picker_widget,
+    polish_substage_value,
     read_env,
     read_vision_config,
     stage_value,
     write_env,
+    write_polish_substage_env,
     write_vision_config,
 )
 
@@ -96,6 +99,28 @@ for row_idx, pair in enumerate(stage_pairs):
             )
             new_cfg[stage] = {"api_key": api_key, "base_url": base_url, "model": model}
 
+            # 测试按钮
+            _can_test = bool(api_key.strip() and model.strip())
+            if st.button(
+                "🧪 测试连接",
+                key=f"btn_test_{stage}",
+                disabled=not _can_test,
+                width="stretch",
+            ):
+                with st.spinner(f"测试 {model} …"):
+                    try:
+                        from trpg2novel.llm.client import chat, make_client
+                        _client = make_client(api_key.strip(), base_url.strip())
+                        _reply = chat(
+                            _client, model.strip(),
+                            [{"role": "user", "content": "Reply with the single word OK."}],
+                            temperature=0,
+                            max_tokens=10,
+                        )
+                        st.success(f"✅ 可用，回复：{_reply.strip()[:40]}")
+                    except Exception as _exc:
+                        st.error(f"❌ 失败：{_exc}")
+
             st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
 
     if row_idx == 0:
@@ -109,7 +134,7 @@ st.divider()
 
 save_col, status_col = st.columns([1, 3])
 with save_col:
-    if st.button("💾 保存全部配置", type="primary", use_container_width=True):
+    if st.button("💾 保存全部配置", type="primary", width="stretch"):
         write_env(env, new_cfg)
         st.success("已保存到 .env")
         st.rerun()
@@ -121,6 +146,73 @@ with status_col:
         st.success(f"已配置：{'、'.join(configured_stages)}")
     if missing_stages:
         st.warning(f"未配置：{'、'.join(missing_stages)}")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 润色工作流子步骤模型
+# ---------------------------------------------------------------------------
+
+st.markdown("#### ✨ 高级：润色模型")
+st.caption("当前润色流程已移除“先规划再改写”，只配置文学成稿模型；轻量自检仅在润色页勾选时使用。")
+polish_sub_cfg: dict[str, dict[str, str]] = {}
+with st.expander("配置文学成稿 / 轻量自检", expanded=False):
+    sub_cols = st.columns(2)
+    for idx, (substage, label) in enumerate(POLISH_SUBSTAGES):
+        with sub_cols[idx]:
+            api_key_cur = polish_substage_value(env, substage, "api_key")
+            base_url_cur = polish_substage_value(env, substage, "base_url")
+            model_cur = polish_substage_value(env, substage, "model")
+            st.markdown(f"**{label}**")
+            if substage == "polish_rewrite":
+                st.caption("建议：Opus 4.7 / 最强文笔模型")
+            else:
+                st.caption("建议：便宜稳定模型")
+            api_key = st.text_input(
+                "API Key",
+                value=api_key_cur,
+                type="password",
+                key=f"cfg_{substage}_api_key",
+                placeholder="留空则继承润色阶段",
+            )
+            base_url = st.text_input(
+                "Base URL",
+                value=base_url_cur,
+                key=f"cfg_{substage}_base_url",
+            )
+            st.markdown("**Model**")
+            model = model_picker_widget(
+                fetch_key=substage,
+                model_input_key=f"cfg_{substage}_model",
+                current_model=model_cur,
+                api_key=api_key,
+                base_url=base_url,
+            )
+            polish_sub_cfg[substage] = {"api_key": api_key, "base_url": base_url, "model": model}
+            if st.button(
+                "🧪 测试连接",
+                key=f"btn_test_{substage}",
+                disabled=not (api_key.strip() and model.strip()),
+                width="stretch",
+            ):
+                with st.spinner(f"测试 {model} …"):
+                    try:
+                        from trpg2novel.llm.client import chat, make_client
+                        _client = make_client(api_key.strip(), base_url.strip())
+                        _reply = chat(
+                            _client, model.strip(),
+                            [{"role": "user", "content": "Reply with the single word OK."}],
+                            temperature=0,
+                            max_tokens=10,
+                        )
+                        st.success(f"✅ 可用，回复：{_reply.strip()[:40]}")
+                    except Exception as _exc:
+                        st.error(f"❌ 失败：{_exc}")
+
+    if st.button("💾 保存润色工作流模型", key="btn_save_polish_workflow", type="primary"):
+        write_polish_substage_env(env, polish_sub_cfg)
+        st.success("已保存润色模型配置")
+        st.rerun()
 
 st.divider()
 
@@ -165,6 +257,21 @@ with vc2:
     if st.button("💾 保存识图配置", key="btn_save_vision", type="primary"):
         write_vision_config(v_api_key.strip(), v_base_url.strip(), v_model.strip())
         st.success("识图模型配置已保存")
+    _can_test_v = bool(v_api_key.strip() and v_model.strip())
+    if st.button("🧪 测试连接", key="btn_test_vision", disabled=not _can_test_v, width="stretch"):
+        with st.spinner(f"测试 {v_model} …"):
+            try:
+                from trpg2novel.llm.client import chat, make_client
+                _vc = make_client(v_api_key.strip(), v_base_url.strip())
+                _vr = chat(
+                    _vc, v_model.strip(),
+                    [{"role": "user", "content": "Reply with the single word OK."}],
+                    temperature=0,
+                    max_tokens=10,
+                )
+                st.success(f"✅ 可用，回复：{_vr.strip()[:40]}")
+            except Exception as _exc:
+                st.error(f"❌ 失败：{_exc}")
 
 st.divider()
 

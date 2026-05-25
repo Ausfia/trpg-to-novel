@@ -30,6 +30,46 @@
 
 裸文本会被记为 warning + 默认按 OOC 处理。
 
+## 环境准备
+
+启动项目前需要准备：
+
+- Python 3.10+（建议使用虚拟环境）
+- Git（用于拉取项目和保留本地修改）
+- pip / setuptools / wheel
+- 可访问的 LLM API key（按 `.env.example` 填入 `.env`）
+
+创建并进入虚拟环境：
+
+```bash
+# Windows PowerShell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# macOS / Linux
+python -m venv .venv
+source .venv/bin/activate
+```
+
+升级基础安装工具：
+
+```bash
+python -m pip install -U pip setuptools wheel
+```
+
+如果下载依赖较慢，可以临时使用国内 PyPI 镜像源，例如清华源：
+
+```bash
+python -m pip install -U pip setuptools wheel -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -e ".[dev]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+也可以设置为当前虚拟环境的默认源：
+
+```bash
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
 ## 使用
 
 ```bash
@@ -46,8 +86,23 @@ trpg2novel parse data/raw_logs/s01.md
 # 自动章节断点检测 + 章节生成
 trpg2novel draft --auto-detect
 
-# 起 UI
-streamlit run ui/app.py
+# 起 UI（推荐从项目根目录启动）
+python -m streamlit run ui/app.py
+```
+
+如果看到 `ModuleNotFoundError: No module named 'ui'`，通常是因为没有在项目根目录启动，或 Streamlit 启动时没有把项目根目录加入 Python 导入路径。请先进入 `trpg-to-novel/`，激活虚拟环境并使用上面的 `python -m streamlit run ui/app.py` 启动；`ui/app.py` 也会在启动时自动把项目根目录和 `src/` 加入 `sys.path`。
+
+如果换设备后继续看到 `ModuleNotFoundError: No module named 'yaml'`、`click`、`openai` 等依赖错误，说明当前虚拟环境还没有完整安装项目依赖。务必使用**启动 WebUI 的同一个 Python**安装依赖，建议在项目根目录执行：
+
+```bash
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev]"
+```
+
+不要只看 `pip install xxx` 的输出；`pip` 可能指向另一个 Python。可用下面命令确认当前终端的 Python 路径：
+
+```bash
+python -c "import sys; print(sys.executable)"
 ```
 
 ## 状态

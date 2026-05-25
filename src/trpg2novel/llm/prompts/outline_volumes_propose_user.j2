@@ -1,0 +1,23 @@
+## campaign 大纲
+{{ campaign_outline_json }}
+
+## 运行状态
+{{ state_json }}
+
+{% if hint_scene_id %}## 强切提示
+{{ hint_scene_id }}
+
+{% endif %}## scene 时间线
+{{ scene_timeline_json }}
+
+## 生成要求
+- 只输出 JSON object。
+- `proposed_volumes[].scene_ids` 必须是输入 scene_id 的子集。
+- `scene_id_range` 必须覆盖该卷的首尾 scene_id。
+- 每卷尽量 5–12 个 scene；若尾段不足，请放入 pending_scenes。
+- `working_title`、`theme_summary`、`reasoning` 要简短但具体。
+- `pending_reason` 只写不足成卷的核心原因。
+- `based_on_scene_count` 填本次输入 scene 数量。
+- `batch_count` 如未分批可写 1。
+
+请直接输出 JSON。

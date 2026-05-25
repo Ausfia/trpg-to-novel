@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -61,7 +62,7 @@ def detect_boundary(
 ) -> DetectionResult:
     """[5] 判断累积场景是否足以成章。"""
     feed = build_feed(scenes, events_by_id)
-    excerpt = feed_to_text(feed, include_roll_outcomes=False)[:1200]
+    excerpt = feed_to_text(feed, include_roll_outcomes=False)
 
     system_prompt = (_PROMPTS_DIR / "chapter_detect_system.txt").read_text(encoding="utf-8")
     user_tmpl = _env.get_template("chapter_detect_user.j2")
@@ -88,6 +89,13 @@ def detect_boundary(
     )
 
 
+def _extract_ending_marker(draft_text: str) -> str:
+    """从草稿末尾提取 CHAPTER_END_MARKER 内容。"""
+    import re
+    m = re.search(r"<!--\s*CHAPTER_END_MARKER:\s*(.*?)\s*-->", draft_text)
+    return m.group(1).strip() if m else ""
+
+
 def draft_chapter(
     scenes: Sequence[Scene],
     events_by_id: dict[str, TaggedEvent],
@@ -98,6 +106,7 @@ def draft_chapter(
     last_chapter_summary: str = "",
     absent_players: list[str] | None = None,
     retired_characters: list[dict] | None = None,
+    previous_ending_marker: str = "",
     *,
     api_key: str,
     base_url: str,
@@ -147,6 +156,7 @@ def draft_chapter(
         nofiyad_facts=nofiyad_facts,
         pc_facts=pc_facts or {},
         last_chapter_summary=last_chapter_summary,
+        previous_ending_marker=previous_ending_marker,
         lore_unlocked=state.lore_unlocked,
         retrieved=retrieved,
     )
@@ -158,10 +168,11 @@ def draft_chapter(
     )
 
     client = make_client(api_key, base_url)
+    draft_max_tokens = int(os.environ.get("LLM_DRAFT_MAX_TOKENS", "16000"))
     draft_text = chat(client, model, [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
-    ], temperature=0.85, max_tokens=6000)
+    ], temperature=0.85, max_tokens=draft_max_tokens)
 
     total_events = sum(s.event_count for s in scenes)
     return ChapterResult(

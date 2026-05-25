@@ -74,7 +74,7 @@ with left_col:
         portrait = _find_portrait(pc_name)
         c_img, c_info, c_btn = st.columns([1, 3, 1])
         if portrait:
-            c_img.image(str(portrait), use_container_width=True)
+            c_img.image(str(portrait), width="stretch")
         else:
             c_img.markdown(
                 '<div style="width:100%;aspect-ratio:1;background:var(--color-bg-soft);'
@@ -87,12 +87,13 @@ with left_col:
             race_class += card.race
         if hasattr(card, "class_name") and card.class_name:
             race_class += " " + card.class_name
-        retired_badge = (
-            ' <span class="tn-badge tn-badge-warn" style="font-size:10px">退团</span>'
-            if card.left_after_session else ""
-        )
+        status_badges = ""
+        if card.first_appearance_session:
+            status_badges += ' <span class="tn-badge" style="font-size:10px;background:#555">未入场</span>'
+        if card.left_after_session:
+            status_badges += ' <span class="tn-badge tn-badge-warn" style="font-size:10px">退团</span>'
         c_info.markdown(
-            f"**{pc_name}**{retired_badge}" + (f"  \n{race_class.strip()}" if race_class else ""),
+            f"**{pc_name}**{status_badges}" + (f"  \n{race_class.strip()}" if race_class else ""),
             unsafe_allow_html=True,
         )
         if c_btn.button("编辑", key=f"edit_{pc_name}"):
@@ -101,7 +102,7 @@ with left_col:
             st.rerun()
 
     st.markdown("---")
-    if st.button("+ 新建人物卡", use_container_width=True, key="btn_new_card"):
+    if st.button("+ 新建人物卡", width="stretch", key="btn_new_card"):
         st.session_state["card_edit_name"] = None
         st.session_state["card_edit_data"] = {}
         st.rerun()
@@ -190,7 +191,7 @@ with right_col:
                 st.markdown(f"- {_t}")
         else:
             st.caption("尚未生成，保存人物卡后自动调用 LLM 生成。")
-        if edit_name and kt_col2.button("↺ 重新生成", key=f"btn_regen_traits_{edit_name}", use_container_width=True):
+        if edit_name and kt_col2.button("↺ 重新生成", key=f"btn_regen_traits_{edit_name}", width="stretch"):
             _yaml_p = camp.character_cards_dir / f"{edit_name}.yaml"
             if _yaml_p.exists():
                 with st.spinner("生成关键特征中…"):
@@ -213,7 +214,16 @@ with right_col:
             st.markdown("**基本信息**")
             r1, r2 = st.columns(2)
             name = r1.text_input("角色名 *", value=data.get("name", ""))
-            player_handle = r2.text_input("玩家 handle（可选）", value=data.get("player_handle", ""))
+
+            # 别名字段（替代旧的 player_handle）
+            aliases_default = "\n".join(data.get("aliases") or [])
+            aliases_text = r2.text_area(
+                "别名（可选，每行一个）",
+                value=aliases_default,
+                height=60,
+                help="填入玩家在群聊中可能使用的昵称，每行一个。解析时会自动识别这些别名。"
+            )
+
             r3, r4, r5, r6 = st.columns(4)
             race = r3.text_input("种族", value=data.get("race", ""))
             subrace = r4.text_input("亚种（可选）", value=data.get("subrace", ""))
@@ -247,6 +257,22 @@ with right_col:
                                    help="每行一条例句，帮助 AI 模仿角色说话风格")
 
             st.markdown("---")
+            st.markdown("**角色入场设置**")
+            _first_val = data.get("first_appearance_session") or ""
+            if _first_val:
+                st.markdown(
+                    '<span class="tn-badge" style="background:#555">📥 待入场</span>  '
+                    f'入场场次：`{_first_val}`',
+                    unsafe_allow_html=True,
+                )
+            fe1, _ = st.columns([1, 2])
+            first_appearance_session = fe1.text_input(
+                "入场场次（该角色自此场次起才参与故事；之前场次自动标记为未入场）",
+                value=_first_val,
+                placeholder="如：s04",
+                help="留空表示角色从 s01 即在场",
+            )
+
             st.markdown("**角色退出设置**")
             _left_val = data.get("left_after_session") or ""
             _exit_val = data.get("exit_story") or ""
@@ -276,10 +302,11 @@ with right_col:
                 st.error("角色名不能为空")
             else:
                 voice_examples = [ln.strip() for ln in ve_text.splitlines() if ln.strip()]
+                aliases = [ln.strip() for ln in aliases_text.splitlines() if ln.strip()]
                 new_name = name.strip()
                 save_dict: dict = {
                     "name": new_name,
-                    "player_handle": player_handle.strip(),
+                    "aliases": aliases,
                     "race": race.strip(),
                     "class": class_name.strip(),
                     "age": age.strip(),
@@ -300,6 +327,8 @@ with right_col:
                     save_dict["subclass"] = subclass.strip()
                 if special_background.strip():
                     save_dict["special_background"] = special_background.strip()
+                if first_appearance_session.strip():
+                    save_dict["first_appearance_session"] = first_appearance_session.strip()
                 if left_after_session.strip():
                     save_dict["left_after_session"] = left_after_session.strip()
                 if exit_story.strip():
@@ -339,7 +368,7 @@ with right_col:
 
             with img_col:
                 if portrait_path:
-                    st.image(str(portrait_path), caption=edit_name, use_container_width=True)
+                    st.image(str(portrait_path), caption=edit_name, width="stretch")
                     # Show whether appearance_ai exists
                     yaml_path_for_ai = camp.character_cards_dir / f"{edit_name}.yaml"
                     if yaml_path_for_ai.exists():
@@ -367,7 +396,7 @@ with right_col:
                 )
                 if new_portrait:
                     ext = Path(new_portrait.name).suffix.lower() or ".png"
-                    if st.button("保存图片", key=f"btn_save_portrait_{edit_name}", use_container_width=True):
+                    if st.button("保存图片", key=f"btn_save_portrait_{edit_name}", width="stretch"):
                         camp.character_cards_dir.mkdir(parents=True, exist_ok=True)
                         _save_portrait(edit_name, new_portrait.read(), ext)
                         st.success("立绘已保存")
@@ -384,7 +413,7 @@ with right_col:
                     if st.button(
                         "🔍 分析外貌",
                         key=f"btn_analyze_{edit_name}",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary",
                     ):
                         with st.spinner("调用识图模型中，请稍候…"):

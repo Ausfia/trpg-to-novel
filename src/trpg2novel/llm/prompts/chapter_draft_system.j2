@@ -62,6 +62,10 @@
 {% if last_chapter_summary %}## 上一章结尾摘要（续写参考）
 {{ last_chapter_summary }}
 
+{% endif %}{% if previous_ending_marker %}## 上一章结尾情境标记
+上一章结尾时的状态：{{ previous_ending_marker }}
+请从该情境之后自然接续，不要重复上一章已写过的内容。
+
 {% endif %}{% if lore_unlocked %}## 玩家已知设定事实
 {% for lore in lore_unlocked %}- {{ lore }}
 {% endfor %}

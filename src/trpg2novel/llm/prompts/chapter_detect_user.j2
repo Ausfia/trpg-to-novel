@@ -14,11 +14,21 @@
 
 ## 全部待处理场景（共 {{ scenes | length }} 个场景，{{ total_events }} 条事件）
 {% for scene in scenes %}
-- [{{ scene.id }}] {{ scene.kind }}场景，{{ scene.start_ts }}→{{ scene.end_ts }}，{{ scene.event_count }}条事件{% if scene.triggers %}，触发：{{ scene.triggers | join("、") }}{% endif %}
+{% set cumulative_scenes = loop.index %}
+{% set cumulative_events = namespace(count=0) %}
+{% for s in scenes[:loop.index] %}
+{% set cumulative_events.count = cumulative_events.count + s.event_count %}
+{% endfor %}
+- [{{ scene.id }}] {{ scene.kind }}场景，{{ scene.start_ts }}→{{ scene.end_ts }}，{{ scene.event_count }}条事件{% if scene.triggers %}，触发：{{ scene.triggers | join("、") }}{% endif %} | 累计：{{ cumulative_scenes }}场景/{{ cumulative_events.count }}事件
 {% endfor %}
 
-## 场景内容摘要（前600字，供参考故事走向）
-{{ narrative_excerpt | truncate(600) }}
+**复杂度提示**：
+- 建议单章：3-5个场景，50-100个事件
+- 最大单章：6个场景，150个事件
+- 如果累计数超过建议值，请选择更早的断点
+
+## 场景内容（完整叙事文本，供判断断点）
+{{ narrative_excerpt }}
 
 ---
 请在上方场景列表里找到**第一个自然章节结束点**，输出 JSON 结果（只输出 JSON，不含 markdown 代码块）：

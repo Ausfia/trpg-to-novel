@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -71,6 +72,11 @@ STAGES: list[tuple[str, str]] = [
     ("review", "一致性审稿"),
 ]
 
+POLISH_SUBSTAGES: list[tuple[str, str]] = [
+    ("polish_rewrite", "文学改写"),
+    ("polish_check", "轻量自检"),
+]
+
 STAGE_ICONS = {
     "detect": "🔍",
     "draft": "✍️",
@@ -119,14 +125,20 @@ def stage_value(env: dict[str, str], stage: str, field: str) -> str:
 
 def write_env(env: dict[str, str], stage_cfg: dict[str, dict[str, str]]) -> None:
     """把 4 个阶段的配置写回 .env，保留其他自定义键。"""
+    stage_env_keys = {
+        f"LLM_{stage.upper()}_{field}"
+        for stage, _ in STAGES
+        for field in ("API_KEY", "BASE_URL", "MODEL")
+    }
+    legacy_keys = {
+        "OPENAI_API_KEY", "OPENAI_BASE_URL",
+        "STAGE_MODEL_CHAPTER_DETECT",
+        "STAGE_MODEL_DRAFT", "STAGE_MODEL_POLISH", "STAGE_MODEL_REVIEW",
+        "STAGE_MODEL_SEGMENT",
+    }
     out: dict[str, str] = {
         k: v for k, v in env.items()
-        if not k.startswith("LLM_") and k not in {
-            "OPENAI_API_KEY", "OPENAI_BASE_URL",
-            "STAGE_MODEL_CHAPTER_DETECT",
-            "STAGE_MODEL_DRAFT", "STAGE_MODEL_POLISH", "STAGE_MODEL_REVIEW",
-            "STAGE_MODEL_SEGMENT",
-        }
+        if k not in stage_env_keys and k not in legacy_keys
     }
     for stage, cfg in stage_cfg.items():
         upper = stage.upper()
@@ -138,6 +150,40 @@ def write_env(env: dict[str, str], stage_cfg: dict[str, dict[str, str]]) -> None
         out["OPENAI_API_KEY"] = draft["api_key"]
     if draft.get("base_url"):
         out["OPENAI_BASE_URL"] = draft["base_url"]
+    lines = [f"{k}={v}" for k, v in out.items()]
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def polish_substage_value(env: dict[str, str], substage: str, field: str) -> str:
+    """读取 polish 子步骤配置；缺省继承 LLM_POLISH_*。"""
+    suffix = substage.removeprefix("polish_").upper()
+    key = f"LLM_POLISH_{suffix}_{field.upper()}"
+    if key in env:
+        return env[key]
+    if field == "api_key":
+        return stage_value(env, "polish", "api_key")
+    if field == "base_url":
+        return stage_value(env, "polish", "base_url")
+    if field == "model":
+        if substage == "polish_check":
+            return stage_value(env, "review", "model")
+        return stage_value(env, "polish", "model")
+    return ""
+
+
+def write_polish_substage_env(env: dict[str, str], substage_cfg: dict[str, dict[str, str]]) -> None:
+    """写入 polish 子步骤 LLM 配置，保留其他 .env 键并清理旧 plan 配置。"""
+    removed_keys = {
+        "LLM_POLISH_PLAN_API_KEY",
+        "LLM_POLISH_PLAN_BASE_URL",
+        "LLM_POLISH_PLAN_MODEL",
+    }
+    out = {k: v for k, v in env.items() if k not in removed_keys}
+    for substage, cfg in substage_cfg.items():
+        suffix = substage.removeprefix("polish_").upper()
+        out[f"LLM_POLISH_{suffix}_API_KEY"] = cfg.get("api_key", "")
+        out[f"LLM_POLISH_{suffix}_BASE_URL"] = cfg.get("base_url", DEFAULT_BASE_URL)
+        out[f"LLM_POLISH_{suffix}_MODEL"] = cfg.get("model", "")
     lines = [f"{k}={v}" for k, v in out.items()]
     ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -190,7 +236,7 @@ def model_picker_widget(
         if st.button(
             "↓ 获取模型列表",
             key=f"_btn_fetch_models_{fetch_key}",
-            use_container_width=True,
+            width="stretch",
             help="使用上方填写的 API Key + Base URL 获取可用模型",
         ):
             if api_key.strip() and base_url.strip():
@@ -299,8 +345,103 @@ def load_state(campaign_root: str) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
 
 
+def save_state(campaign_root: str, data: dict) -> None:
+    path = Path(campaign_root) / "story_state.yaml"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
 def list_chapters(camp: Campaign) -> list[Path]:
     return sorted(camp.chapters_dir.glob("ch*_draft.md"))
+
+
+def chapter_base_stem(chapter_path_or_name: Path | str) -> str:
+    """Return the stable chXX stem for any chapter stage file."""
+    stem = Path(chapter_path_or_name).stem
+    return stem.replace("_draft", "").replace("_revised", "").replace("_polished", "").replace("_reviewed", "")
+
+
+def chapter_stage_paths(draft_path: Path) -> dict[str, Path]:
+    """Derive all stage paths from the canonical chXX_draft.md path."""
+    base = chapter_base_stem(draft_path)
+    return {
+        "draft": draft_path.with_name(f"{base}_draft.md"),
+        "revised": draft_path.with_name(f"{base}_revised.md"),
+        "polished": draft_path.with_name(f"{base}_polished.md"),
+        "reviewed": draft_path.with_name(f"{base}_reviewed.md"),
+    }
+
+
+def chapter_number(chapter_path_or_name: Path | str) -> int:
+    match = re.match(r"ch(\d+)", chapter_base_stem(chapter_path_or_name))
+    return int(match.group(1)) if match else 0
+
+
+def extract_markdown_title(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return ""
+
+
+def chapter_entry_for(state: dict, draft_name: str) -> dict:
+    for entry in state.get("chapter_index") or []:
+        if entry.get("file") == draft_name:
+            return entry
+    return {}
+
+
+def chapter_title_from_state(state: dict, draft_name: str) -> str:
+    entry = chapter_entry_for(state, draft_name)
+    return str(entry.get("title") or "").strip()
+
+
+def safe_filename_part(text: str, fallback: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|]', "", text or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned or fallback
+
+
+def final_chapter_path(draft_path: Path, text: str, state: dict | None = None) -> Path:
+    base = chapter_base_stem(draft_path)
+    draft_name = f"{base}_draft.md"
+    title = extract_markdown_title(text)
+    if not title and state:
+        title = chapter_title_from_state(state, draft_name)
+    title = safe_filename_part(title, base)
+    num = chapter_number(draft_path)
+    prefix = f"第{num}章" if num else "第X章"
+    return draft_path.with_name(f"{prefix}-{title}.md")
+
+
+def update_chapter_entry(campaign_root: str, draft_path: Path, **fields: str) -> None:
+    state = load_state(campaign_root)
+    draft_name = chapter_stage_paths(draft_path)["draft"].name
+    entries = state.get("chapter_index") or []
+    changed = False
+    for entry in entries:
+        if entry.get("file") == draft_name:
+            entry.update({k: v for k, v in fields.items() if v})
+            changed = True
+            break
+    if changed:
+        state["chapter_index"] = entries
+        save_state(campaign_root, state)
+
+
+def chapter_status(draft_path: Path, state: dict | None = None) -> dict[str, str]:
+    paths = chapter_stage_paths(draft_path)
+    entry = chapter_entry_for(state or {}, paths["draft"].name)
+    final_name = entry.get("final_file")
+    if final_name and (draft_path.parent / final_name).exists():
+        return {"label": "已成稿", "kind": "ok", "stage": "final", "path": final_name}
+    if paths["reviewed"].exists():
+        return {"label": "已审查", "kind": "ok", "stage": "reviewed", "path": paths["reviewed"].name}
+    if paths["polished"].exists():
+        return {"label": "已润色", "kind": "ok", "stage": "polished", "path": paths["polished"].name}
+    if paths["revised"].exists():
+        return {"label": "已修订", "kind": "warn", "stage": "revised", "path": paths["revised"].name}
+    return {"label": "草稿", "kind": "info", "stage": "draft", "path": paths["draft"].name}
 
 
 def list_sessions(camp: Campaign) -> list[str]:
@@ -419,6 +560,7 @@ def _render_health_badges(camp: Campaign | None) -> None:
         badges.append(f'<span class="tn-badge {cls}">{mark} {icon}{label}</span>')
 
     kb_state = "—"
+    style_kb_state = "—"
     if camp is not None:
         try:
             from trpg2novel.rag import KnowledgeBase, load_kb_config
@@ -429,7 +571,17 @@ def _render_health_badges(camp: Campaign | None) -> None:
                 kb_state = f"{cnt} 片段" if cnt > 0 else "空"
         except Exception:
             kb_state = "未启用"
-    badges.append(f'<span class="tn-badge tn-badge-info">📚 KB {kb_state}</span>')
+        try:
+            from trpg2novel.rag import KnowledgeBase, load_kb_config
+            style_cfg = load_kb_config(camp.style_kb_config_yaml)
+            if style_cfg.is_configured():
+                style_kb = KnowledgeBase.open(camp.style_knowledge_base_dir, style_cfg)
+                style_cnt = style_kb.count_chunks()
+                style_kb_state = f"{style_cnt} 片段" if style_cnt > 0 else "空"
+        except Exception:
+            style_kb_state = "未启用"
+    badges.append(f'<span class="tn-badge tn-badge-info">📚 世界观KB {kb_state}</span>')
+    badges.append(f'<span class="tn-badge tn-badge-info">🎨 风格KB {style_kb_state}</span>')
 
     st.markdown(
         '<div class="tn-topbar-right">' + " ".join(badges) + "</div>",

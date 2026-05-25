@@ -1,0 +1,28 @@
+{% if outline %}## 现有大纲草案
+{{ outline }}
+
+{% endif %}## 世界观
+{{ worldview_excerpt }}
+
+{% if custom_lore %}## 团内世界观备忘
+{{ custom_lore }}
+
+{% endif %}## 人物卡
+{{ pc_facts }}
+
+## 故事状态
+{{ state_summary }}
+
+{% if narrative_excerpt %}## 叙事材料
+{{ narrative_excerpt }}
+
+{% endif %}## 生成要求
+- 只输出 JSON object。
+- `based_on_sessions` 必须包含本次覆盖的 session_id。
+- `key_characters` 要覆盖输入人物卡中的关键角色；新角色允许补入。
+- `status` 取值只允许 active / retired / not_yet_joined。
+- 若人物卡里已有 left_after_session / exit_story，必须同步到对应角色。
+- `major_arcs` 至少给出 1 条；`volume_plan` 至少给出 1 条。
+- `evolution_notes` 记录本次生成时识别到的关键变化。
+
+请直接输出 JSON。

@@ -1,0 +1,48 @@
+name: heroic_fantasy_drama
+description: 英雄奇幻剧情向——史诗感、群像视角、情绪充沛但不口号化
+
+narrative:
+  pov_default: third_limited
+  tense: past
+  pacing: dynamic_with_breathing_room
+
+prose_style:
+  sentence_length: variable
+  dialogue_ratio: medium
+  imagery_density: medium_high
+  internal_monologue: frequent
+
+themes:
+  - courage_under_pressure
+  - found_family
+  - choice_and_consequence
+  - awe_of_the_unknown
+
+tropes_to_embrace:
+  - environmental_symbolism
+  - quiet_character_revelation
+  - hard_won_resolve
+  - foreshadow_through_detail
+
+tropes_to_avoid:
+  - play_by_play_action_log
+  - omniscient_exposition_dump
+  - shounen_catchphrases
+  - excessive_grimdark
+
+dialogue_style:
+  subtext_over_explanation: true
+  preserve_player_voice: true
+  banter_between_allies: allowed
+  declarations_of_resolve: restrained
+
+combat_style:
+  blow_by_blow: selective
+  focus_on_stakes_and_sensations: true
+  inner_resolve_during_fight: emphasized
+
+forbidden:
+  - meta_commentary
+  - breaking_fourth_wall
+  - direct_rpg_mechanics
+  - copied_author_signature_phrases

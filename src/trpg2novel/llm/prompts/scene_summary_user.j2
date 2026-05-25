@@ -1,0 +1,12 @@
+## 场景元信息
+- scene_id: {{ scene.id }}
+- session: {{ scene.session_id }}
+- 性质: {{ scene.kind }}（{% if scene.kind == "battle" %}战斗{% else %}叙事{% endif %}）
+- 时间范围: {{ scene.start_ts }} → {{ scene.end_ts }}
+- 事件数: {{ scene.event_count }}
+- 触发原因: {{ scene.triggers | join("、") }}
+
+## 场景内容（narrative feed）
+{{ narrative_excerpt }}
+
+请按 system 指令输出 JSON。

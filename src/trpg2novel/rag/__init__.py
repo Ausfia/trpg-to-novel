@@ -9,8 +9,6 @@
 
 from trpg2novel.rag.chunker import split_text
 from trpg2novel.rag.config import KBConfig, load_kb_config, save_kb_config
-from trpg2novel.rag.embedder import embed_texts
-from trpg2novel.rag.store import KnowledgeBase, RetrievedChunk
 
 __all__ = [
     "KBConfig",
@@ -21,3 +19,13 @@ __all__ = [
     "save_kb_config",
     "split_text",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"KnowledgeBase", "RetrievedChunk"}:
+        from trpg2novel.rag.store import KnowledgeBase, RetrievedChunk
+        return {"KnowledgeBase": KnowledgeBase, "RetrievedChunk": RetrievedChunk}[name]
+    if name == "embed_texts":
+        from trpg2novel.rag.embedder import embed_texts
+        return embed_texts
+    raise AttributeError(name)

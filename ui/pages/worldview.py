@@ -37,11 +37,11 @@ with tab_wv:
         label_visibility="collapsed",
     )
     c1, c2, _ = st.columns([1, 1, 4])
-    if c1.button("保存", type="primary", key="btn_save_wv", use_container_width=True):
+    if c1.button("保存", type="primary", key="btn_save_wv", width="stretch"):
         camp.worldview_md.parent.mkdir(parents=True, exist_ok=True)
         camp.worldview_md.write_text(new_wv, encoding="utf-8")
         st.success("已保存 worldview.md")
-    if c2.button("↺ 重新加载", key="btn_reload_wv", use_container_width=True):
+    if c2.button("↺ 重新加载", key="btn_reload_wv", width="stretch"):
         st.rerun()
     if cur_wv:
         st.caption(f"当前：{len(cur_wv)} 字符 / {cur_wv.count(chr(10)) + 1} 行")
@@ -55,6 +55,7 @@ _STATE_PATH = camp.root / "story_state.yaml"
 _LORE_KEY = f"lore_edit_{camp.id}"
 _LORE_PAGE_KEY = f"lore_page_{camp.id}"
 _LORE_LOADED_KEY = f"lore_loaded_{camp.id}"
+_NEXT_ID_KEY = f"lore_next_id_{camp.id}"
 _PAGE_SIZE = 15
 
 
@@ -64,9 +65,9 @@ def _load_state_raw() -> dict:
     return {}
 
 
-def _save_lore(items: list[str]) -> None:
+def _save_lore(items: list[dict]) -> None:
     state = _load_state_raw()
-    state["lore_unlocked"] = [s.strip() for s in items if s.strip()]
+    state["lore_unlocked"] = [item["text"].strip() for item in items if item["text"].strip()]
     _STATE_PATH.write_text(
         yaml.safe_dump(state, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -74,17 +75,37 @@ def _save_lore(items: list[str]) -> None:
     st.cache_data.clear()
 
 
+def _delete_lore_item(item_id: int) -> None:
+    items: list[dict] = st.session_state.get(_LORE_KEY, [])
+    st.session_state[_LORE_KEY] = [item for item in items if item["id"] != item_id]
+    # 页数可能减少，回退一页
+    lc = st.session_state.get("lore_search", "").strip().lower()
+    new_total = len([item for item in st.session_state[_LORE_KEY] if not lc or lc in item["text"].lower()])
+    new_tp = max(1, (new_total + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = st.session_state.get(_LORE_PAGE_KEY, 0)
+    st.session_state[_LORE_PAGE_KEY] = min(page, new_tp - 1)
+
+
 def _init_lore() -> None:
     if not st.session_state.get(_LORE_LOADED_KEY):
         raw = _load_state_raw().get("lore_unlocked") or []
-        st.session_state[_LORE_KEY] = list(raw)
+        existing = st.session_state.get(_LORE_KEY)
+        # 向后兼容：如果已是 list[dict] 则保留；否则从磁盘加载并转换
+        if isinstance(existing, list) and existing and isinstance(existing[0], dict):
+            st.session_state[_LORE_LOADED_KEY] = True
+            return
+        max_id = max((item["id"] for item in existing), default=0) if isinstance(existing, list) and existing and isinstance(existing[0], dict) else 0
+        st.session_state[_LORE_KEY] = [
+            {"id": i + 1, "text": s} for i, s in enumerate(raw)
+        ]
+        st.session_state[_NEXT_ID_KEY] = max(max_id, len(raw)) + 1
         st.session_state[_LORE_PAGE_KEY] = 0
         st.session_state[_LORE_LOADED_KEY] = True
 
 
 with tab_lore:
     _init_lore()
-    items: list[str] = st.session_state[_LORE_KEY]
+    items: list[dict] = st.session_state[_LORE_KEY]
 
     # ---- 顶部工具栏
     tool_col1, tool_col2, tool_col3 = st.columns([3, 1, 1])
@@ -96,11 +117,11 @@ with tab_lore:
             label_visibility="collapsed",
         )
     with tool_col2:
-        if st.button("💾 保存全部", key="lore_save_top", use_container_width=True, type="primary"):
+        if st.button("💾 保存全部", key="lore_save_top", width="stretch", type="primary"):
             _save_lore(items)
-            st.success(f"已保存 {len([s for s in items if s.strip()])} 条设定到 story_state.yaml")
+            st.success(f"已保存 {len([it for it in items if it['text'].strip()])} 条设定到 story_state.yaml")
     with tool_col3:
-        if st.button("↺ 从磁盘重载", key="lore_reload", use_container_width=True):
+        if st.button("↺ 从磁盘重载", key="lore_reload", width="stretch"):
             st.session_state[_LORE_LOADED_KEY] = False
             st.rerun()
 
@@ -112,7 +133,7 @@ with tab_lore:
 
     # ---- 过滤 + 分页
     lc = search.strip().lower()
-    filtered = [(i, v) for i, v in enumerate(items) if not lc or lc in v.lower()]
+    filtered = [item for item in items if not lc or lc in item["text"].lower()]
 
     total = len(filtered)
     total_pages = max(1, (total + _PAGE_SIZE - 1) // _PAGE_SIZE)
@@ -126,32 +147,27 @@ with tab_lore:
     elif not page_slice:
         st.info("没有匹配的条目。")
     else:
-        to_delete = -1
-        for orig_idx, val in page_slice:
+        for item in page_slice:
             row_c1, row_c2 = st.columns([10, 1])
-            items[orig_idx] = row_c1.text_input(
-                f"条目 {orig_idx + 1}",
-                value=val,
-                key=f"lore_item_{camp.id}_{orig_idx}",
+            item["text"] = row_c1.text_input(
+                f"条目 {item['id']}",
+                value=item["text"],
+                key=f"lore_item_{camp.id}_{item['id']}",
                 label_visibility="collapsed",
             )
-            if row_c2.button("✕", key=f"lore_del_{camp.id}_{orig_idx}", help="删除此条"):
-                to_delete = orig_idx
-
-        if to_delete >= 0:
-            items.pop(to_delete)
-            st.session_state[_LORE_KEY] = items
-            # 页数可能减少，回退一页
-            new_total = len([v for v in items if not lc or lc in v.lower()])
-            new_tp = max(1, (new_total + _PAGE_SIZE - 1) // _PAGE_SIZE)
-            st.session_state[_LORE_PAGE_KEY] = min(page, new_tp - 1)
-            st.rerun()
+            row_c2.button(
+                "✕",
+                key=f"lore_del_{camp.id}_{item['id']}",
+                on_click=_delete_lore_item,
+                args=(item["id"],),
+                help="删除此条",
+            )
 
     # ---- 分页控件
     if total_pages > 1:
         st.divider()
         pg1, pg2, pg3 = st.columns([1, 3, 1])
-        if pg1.button("← 上一页", key="lore_prev", disabled=page == 0, use_container_width=True):
+        if pg1.button("← 上一页", key="lore_prev", disabled=page == 0, width="stretch"):
             st.session_state[_LORE_PAGE_KEY] = page - 1
             st.rerun()
         pg2.markdown(
@@ -160,7 +176,7 @@ with tab_lore:
             f'</div>',
             unsafe_allow_html=True,
         )
-        if pg3.button("下一页 →", key="lore_next", disabled=page >= total_pages - 1, use_container_width=True):
+        if pg3.button("下一页 →", key="lore_next", disabled=page >= total_pages - 1, width="stretch"):
             st.session_state[_LORE_PAGE_KEY] = page + 1
             st.rerun()
 
@@ -174,16 +190,19 @@ with tab_lore:
         placeholder="如：银月城已被玩家夺回，统治者为 Ausfia",
         label_visibility="collapsed",
     )
-    if add_col2.button("+ 添加", key="lore_add", use_container_width=True):
+    if add_col2.button("+ 添加", key="lore_add", width="stretch"):
         stripped = new_item.strip()
-        if stripped and stripped not in items:
-            items.append(stripped)
+        existing_texts = [item["text"] for item in items]
+        if stripped and stripped not in existing_texts:
+            next_id = st.session_state.get(_NEXT_ID_KEY, 1)
+            items.append({"id": next_id, "text": stripped})
             st.session_state[_LORE_KEY] = items
+            st.session_state[_NEXT_ID_KEY] = next_id + 1
             # 跳到最后一页
             new_tp = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
             st.session_state[_LORE_PAGE_KEY] = new_tp - 1
             st.rerun()
-        elif stripped in items:
+        elif stripped in existing_texts:
             st.warning("该条目已存在。")
         else:
             st.warning("条目不能为空。")

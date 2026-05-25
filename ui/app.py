@@ -18,8 +18,9 @@ from pathlib import Path
 import streamlit as st
 
 _ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(_ROOT / "src"))
+for _path in (_ROOT, _ROOT / "src"):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from ui.shared import inject_theme, render_topbar  # noqa: E402
 
@@ -57,6 +58,7 @@ nav = st.navigation(
         ],
         "✍️ 工作流": [
             _page("pipeline.py", title="解析流程", icon="✍️"),
+            _page("outline.py", title="大纲规划", icon="🧭"),
             _page("review.py", title="章节审稿", icon="📖"),
             _page("polish.py", title="润色对比", icon="✨"),
             _page("consistency.py", title="一致性检查", icon="🪞"),
@@ -65,6 +67,7 @@ nav = st.navigation(
             _page("cards.py", title="人物卡", icon="🎭"),
             _page("worldview.py", title="世界观", icon="🌍"),
             _page("kb.py", title="知识库", icon="📚"),
+            _page("style_kb.py", title="风格方案", icon="🎨"),
         ],
         "⚙️ 设置": [
             _page("campaigns.py", title="团管理", icon="🏛️"),

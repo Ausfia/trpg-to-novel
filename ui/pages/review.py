@@ -6,6 +6,13 @@ import re
 from pathlib import Path
 
 import streamlit as st
+from trpg2novel.chapterize.anchors import (
+    ANCHOR_KEYS,
+    anchor_path_for_chapter,
+    empty_anchor_payload,
+    load_anchor_file,
+    save_anchor_file,
+)
 
 from ui.shared import (
     KIND_LABEL,
@@ -18,10 +25,50 @@ from ui.shared import (
     load_state,
     load_tagged,
     require_campaign,
+    save_state,
 )
 
 st.title("📖 章节审稿")
 st.caption("左：原始场景日志 · 中：章节草稿（可编辑）· 右：故事状态")
+
+ANCHOR_LABELS = {
+    "actions": "关键动作",
+    "dialogues": "关键台词",
+    "choices": "角色选择",
+    "emotions": "情绪/关系变化",
+    "discarded_noise": "应舍弃噪音",
+}
+
+
+def _items_to_text(items: list[dict]) -> str:
+    lines: list[str] = []
+    for item in items:
+        scene = item.get("scene_id") or ""
+        speaker = item.get("speaker") or ""
+        text = item.get("text") or ""
+        prefix = " / ".join(x for x in (scene, speaker) if x)
+        lines.append(f"{prefix}: {text}" if prefix else text)
+    return "\n".join(lines)
+
+
+def _text_to_items(text: str) -> list[dict]:
+    items: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        speaker = ""
+        scene_id = ""
+        body = line
+        if ": " in line:
+            prefix, body = line.split(": ", 1)
+            parts = [p.strip() for p in prefix.split("/") if p.strip()]
+            if len(parts) >= 1:
+                scene_id = parts[0]
+            if len(parts) >= 2:
+                speaker = parts[1]
+        items.append({"scene_id": scene_id, "event_id": "", "speaker": speaker, "text": body.strip()})
+    return items
 
 camp = require_campaign()
 if camp is None:
@@ -29,13 +76,14 @@ if camp is None:
 
 sessions = list_sessions(camp)
 chapters = list_chapters(camp)
+state_yaml = load_state(str(camp.root))
 
 
 # ---------------------------------------------------------------------------
 # 控制栏
 # ---------------------------------------------------------------------------
 
-ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 3, 1, 1])
+ctrl1, ctrl2, ctrl3, ctrl4, ctrl5 = st.columns([2, 3, 1, 1, 1])
 
 with ctrl1:
     if sessions:
@@ -56,7 +104,6 @@ with ctrl2:
 
 # 章节元信息
 if chapters and sel_chap is not None:
-    state_yaml = load_state(str(camp.root))
     _index = state_yaml.get("chapter_index") or []
     _entry = next((e for e in _index if e.get("file") == sel_chap_name), None)
     if _entry:
@@ -68,17 +115,65 @@ if chapters and sel_chap is not None:
 with ctrl3:
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
     if chapters and st.button(
+        "🔄 重新生成",
+        key="btn_regen_chap_init",
+        width="stretch",
+        help="删除本章并清理状态，然后回到大纲规划页重新切章",
+    ):
+        st.session_state["regen_confirm_chap"] = sel_chap_name
+
+with ctrl4:
+    st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+    if chapters and st.button(
         "🗑 删除章节",
         key="btn_del_chap_init",
-        use_container_width=True,
+        width="stretch",
         help="删除该章节的草稿、修订稿、润色稿",
     ):
         st.session_state["del_confirm_chap"] = sel_chap_name
 
-with ctrl4:
+with ctrl5:
     st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
-    if st.button("↺ 刷新", use_container_width=True, key="rev_refresh"):
+    if st.button("↺ 刷新", width="stretch", key="rev_refresh"):
         st.cache_data.clear()
+        st.rerun()
+
+# 重新生成确认对话
+if chapters and st.session_state.get("regen_confirm_chap") == sel_chap_name and sel_chap is not None:
+    base_stem = sel_chap.stem.replace("_draft", "")
+    related = [
+        sel_chap,
+        sel_chap.with_name(sel_chap.name.replace("_draft", "_revised")),
+        sel_chap.with_name(base_stem + "_polished.md"),
+        sel_chap.with_name(base_stem + "_reviewed.md"),
+        sel_chap.with_name(base_stem + "_anchors.json"),
+    ]
+    _entry = next((e for e in (state_yaml.get("chapter_index") or []) if e.get("file") == sel_chap_name), None)
+    if _entry and _entry.get("final_file"):
+        related.append(sel_chap.with_name(_entry["final_file"]))
+    existing = [p for p in related if p.exists()]
+    names_str = "、".join(p.name for p in existing) if existing else sel_chap_name
+    st.warning(f"将删除文件 {names_str} 并释放对应场景，之后请到大纲规划页重新切章。")
+    rc1, rc2, _ = st.columns([1, 1, 4])
+    if rc1.button("确认重新生成", type="primary", key="btn_regen_chap_confirm"):
+        for p in existing:
+            if p.exists():
+                p.unlink()
+        # 清理 state
+        if _entry:
+            processed = list(state_yaml.get("processed_scene_ids") or [])
+            for sid in _entry.get("scene_ids") or []:
+                if sid in processed:
+                    processed.remove(sid)
+            state_yaml["processed_scene_ids"] = processed
+            state_yaml["chapter_index"] = [e for e in (state_yaml.get("chapter_index") or []) if e.get("file") != sel_chap_name]
+            save_state(str(camp.root), state_yaml)
+        st.session_state.pop("regen_confirm_chap", None)
+        st.cache_data.clear()
+        st.success(f"已清理 {sel_chap_name} 及其状态。请切换到「🧭 大纲规划」页面重新切章。")
+        st.rerun()
+    if rc2.button("取消", key="btn_regen_chap_cancel"):
+        st.session_state.pop("regen_confirm_chap", None)
         st.rerun()
 
 # 删除确认对话
@@ -88,7 +183,12 @@ if chapters and st.session_state.get("del_confirm_chap") == sel_chap_name and se
         sel_chap,
         sel_chap.with_name(sel_chap.name.replace("_draft", "_revised")),
         sel_chap.with_name(base_stem + "_polished.md"),
+        sel_chap.with_name(base_stem + "_reviewed.md"),
+        sel_chap.with_name(base_stem + "_anchors.json"),
     ]
+    _entry = next((e for e in (state_yaml.get("chapter_index") or []) if e.get("file") == sel_chap_name), None)
+    if _entry and _entry.get("final_file"):
+        related.append(sel_chap.with_name(_entry["final_file"]))
     existing = [p for p in related if p.exists()]
     names_str = "、".join(p.name for p in existing) if existing else sel_chap_name
     st.warning(f"⚠ 即将删除：{names_str}，不可撤销。")
@@ -104,6 +204,25 @@ if chapters and st.session_state.get("del_confirm_chap") == sel_chap_name and se
         st.rerun()
     if dc2.button("取消", key="btn_del_chap_cancel"):
         st.session_state.pop("del_confirm_chap", None)
+        st.rerun()
+
+# 孤儿条目检测：chapter_index 引用的文件已不存在
+_chapter_index = state_yaml.get("chapter_index") or []
+_orphaned = [e for e in _chapter_index if not (camp.chapters_dir / e["file"]).exists()]
+if _orphaned:
+    _names = "、".join(e["file"] for e in _orphaned)
+    st.warning(f"状态文件记录了 {len(_orphaned)} 个章节但其草稿文件已不存在：{_names}")
+    if st.button("🧹 清理孤儿条目（释放场景可重新入章）", key="btn_clean_orphans"):
+        _processed = list(state_yaml.get("processed_scene_ids") or [])
+        for e in _orphaned:
+            for sid in e.get("scene_ids") or []:
+                if sid in _processed:
+                    _processed.remove(sid)
+        state_yaml["processed_scene_ids"] = _processed
+        state_yaml["chapter_index"] = [e for e in _chapter_index if e not in _orphaned]
+        save_state(str(camp.root), state_yaml)
+        st.cache_data.clear()
+        st.success(f"已清理 {len(_orphaned)} 个孤儿条目，对应场景已释放。请切换到「🧭 大纲规划」页面重新切章。")
         st.rerun()
 
 st.divider()
@@ -188,7 +307,7 @@ with left:
 with mid:
     st.subheader("章节草稿")
     if sel_chap is None:
-        st.info("暂无章节草稿。请先在 Pipeline 页面运行 Draft。")
+        st.info("暂无章节草稿。请先在大纲规划页确认卷并切章。")
     else:
         text = sel_chap.read_text(encoding="utf-8")
         lines = text.splitlines()
@@ -239,11 +358,42 @@ with mid:
                 st.success(f"已保存：{revised_path.name}")
                 st.rerun()
 
+        anchor_path = anchor_path_for_chapter(sel_chap)
+        try:
+            anchors = load_anchor_file(anchor_path) if anchor_path.exists() else empty_anchor_payload(
+                chapter=sel_chap.name,
+            )
+            anchor_error = ""
+        except Exception as exc:
+            anchors = empty_anchor_payload(chapter=sel_chap.name)
+            anchor_error = str(exc)
+
+        with st.expander("📌 素材锚点（润色硬约束）", expanded=False):
+            if anchor_error:
+                st.warning(f"素材锚点读取失败，将以空锚点编辑：{anchor_error}")
+            st.caption("这些内容会传入润色模型，用来保留跑团中的玩家动作、台词、选择和情绪关系。每行一条；删除行即可删除锚点。")
+            edited_anchor_text: dict[str, str] = {}
+            for key in ANCHOR_KEYS:
+                edited_anchor_text[key] = st.text_area(
+                    ANCHOR_LABELS[key],
+                    value=_items_to_text(anchors.get(key) or []),
+                    height=110 if key != "discarded_noise" else 80,
+                    key=f"anchors_{key}_{sel_chap.name}",
+                )
+            if st.button("保存素材锚点", key=f"save_anchors_{sel_chap.name}", type="primary"):
+                payload = dict(anchors)
+                payload["chapter"] = sel_chap.name
+                for key in ANCHOR_KEYS:
+                    payload[key] = _text_to_items(edited_anchor_text[key])
+                save_anchor_file(anchor_path, payload)
+                st.success(f"已保存：{anchor_path.name}")
+                st.rerun()
+
 
 # -------- 右：故事状态 --------
 with right:
     st.subheader("故事状态")
-    state = load_state(str(camp.root))
+    state = state_yaml
     if not state:
         st.info("未找到 story_state.yaml。")
     else:

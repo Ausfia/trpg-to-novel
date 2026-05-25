@@ -81,6 +81,26 @@ class Campaign:
     def kb_config_yaml(self) -> Path:
         return self.knowledge_base_dir / "kb_config.yaml"
 
+    @property
+    def style_profiles_dir(self) -> Path:
+        return self.root / "style_profiles"
+
+    @property
+    def default_style_profile_yaml(self) -> Path:
+        return self.style_profiles_dir / "default.yaml"
+
+    @property
+    def style_recipe_yaml(self) -> Path:
+        return self.root / "style_recipe.yaml"
+
+    @property
+    def style_knowledge_base_dir(self) -> Path:
+        return self.root / "style_knowledge_base"
+
+    @property
+    def style_kb_config_yaml(self) -> Path:
+        return self.style_knowledge_base_dir / "kb_config.yaml"
+
     # ---------- 派生信息 ----------
     def list_sessions(self) -> list[str]:
         """已 segment 完的场次（按 scenes.json 存在判定）。"""

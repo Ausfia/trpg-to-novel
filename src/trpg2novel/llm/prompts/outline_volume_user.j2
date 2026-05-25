@@ -1,0 +1,40 @@
+{% if outline %}## 现有卷大纲草稿
+{{ outline }}
+
+{% endif %}## 卷级阵容
+{% if roster %}{{ roster }}{% endif %}
+
+{% if scene_summary_lines %}## Scene 时间线
+{% for line in scene_summary_lines %}{{ line }}
+{% endfor %}
+
+{% endif %}## 世界观
+{{ worldview_excerpt }}
+
+{% if custom_lore %}## 团内世界观备忘
+{{ custom_lore }}
+
+{% endif %}## 人物卡
+{{ pc_facts }}
+
+## 故事状态
+{{ state_summary }}
+
+{% if last_volume_summary %}## 上一卷摘要
+{{ last_volume_summary }}
+
+{% endif %}{% if narrative_excerpt %}## 叙事材料
+{{ narrative_excerpt }}
+
+{% endif %}## 生成要求
+- 只输出 JSON object，不要 Markdown。
+- `based_on_scenes` 必须覆盖本卷的场景 id。
+- `scene_range` 填本卷首尾 scene id。
+- `roster` 必须按输入阵容生成，不要虚构未在输入中出现的角色。
+- `key_beats` 的 `featured_characters` 只能从 `roster.active_in_volume` 里选。
+- 有退团角色时，至少安排一个 `farewell` key beat。
+- 有新入团角色时，至少安排一个 `opening` 或 `rising` key beat。
+- `ending_strategy` 只能是 closed / cliffhanger / open。
+- `target_word_count_estimate` 与 `target_chapter_count_estimate` 依据 scene 数量给出合理估计。
+
+请直接输出 JSON。

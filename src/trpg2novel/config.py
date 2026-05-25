@@ -74,6 +74,14 @@ class StageLLMConfig:
 
 
 @dataclass(frozen=True)
+class PolishLLMSettings:
+    """Polish 内部分步骤 LLM 配置。"""
+
+    rewrite: StageLLMConfig
+    check: StageLLMConfig
+
+
+@dataclass(frozen=True)
 class LLMSettings:
     """4 阶段独立的 LLM 设置。"""
 
@@ -81,6 +89,7 @@ class LLMSettings:
     draft: StageLLMConfig
     polish: StageLLMConfig
     review: StageLLMConfig
+    polish_workflow: PolishLLMSettings
 
     def for_stage(self, stage: str) -> StageLLMConfig:
         if stage not in STAGE_NAMES:
@@ -131,12 +140,28 @@ def _stage_env(stage: str) -> StageLLMConfig:
     return StageLLMConfig(api_key=api_key, base_url=base_url, model=model)
 
 
+def _polish_substage_env(name: str, fallback: StageLLMConfig) -> StageLLMConfig:
+    """读 polish 子步骤配置；未设置时继承 LLM_POLISH_*。"""
+    upper = f"POLISH_{name.upper()}"
+    api_key = os.environ.get(f"LLM_{upper}_API_KEY") or fallback.api_key
+    base_url = os.environ.get(f"LLM_{upper}_BASE_URL") or fallback.base_url
+    model = os.environ.get(f"LLM_{upper}_MODEL") or fallback.model
+    return StageLLMConfig(api_key=api_key, base_url=base_url, model=model)
+
+
 def load_llm_settings() -> LLMSettings:
+    polish = _stage_env("polish")
+    review = _stage_env("review")
+    polish_workflow = PolishLLMSettings(
+        rewrite=_polish_substage_env("rewrite", polish),
+        check=_polish_substage_env("check", review),
+    )
     return LLMSettings(
         detect=_stage_env("detect"),
         draft=_stage_env("draft"),
-        polish=_stage_env("polish"),
-        review=_stage_env("review"),
+        polish=polish,
+        review=review,
+        polish_workflow=polish_workflow,
     )
 
 

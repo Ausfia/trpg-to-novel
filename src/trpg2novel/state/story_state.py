@@ -38,6 +38,78 @@ class WorldState:
 
 
 @dataclass
+class VolumeRecord:
+    """单卷的运行时元信息（与 outline/volumes/vol{NN}.yaml 互补）。
+
+    status 推进路径：proposed → draft → confirmed → drafting → closed
+    """
+
+    volume_index: int
+    status: str = "proposed"          # proposed / draft / confirmed / drafting / closed
+    outline_path: str = ""
+    skeleton_path: str | None = None
+    scene_ids: list[str] = field(default_factory=list)
+    chapter_indices: list[int] = field(default_factory=list)
+    word_count: int | None = None
+    confirmed_at: str | None = None
+    closed_at: str | None = None
+    proposal_reasoning: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VolumeRecord":
+        return cls(
+            volume_index=int(data.get("volume_index", 0)),
+            status=data.get("status", "proposed"),
+            outline_path=data.get("outline_path", ""),
+            skeleton_path=data.get("skeleton_path"),
+            scene_ids=list(data.get("scene_ids") or []),
+            chapter_indices=list(data.get("chapter_indices") or []),
+            word_count=data.get("word_count"),
+            confirmed_at=data.get("confirmed_at"),
+            closed_at=data.get("closed_at"),
+            proposal_reasoning=data.get("proposal_reasoning", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "volume_index": self.volume_index,
+            "status": self.status,
+            "outline_path": self.outline_path,
+            "skeleton_path": self.skeleton_path,
+            "scene_ids": list(self.scene_ids),
+            "chapter_indices": list(self.chapter_indices),
+            "word_count": self.word_count,
+            "confirmed_at": self.confirmed_at,
+            "closed_at": self.closed_at,
+            "proposal_reasoning": self.proposal_reasoning,
+        }
+
+
+@dataclass
+class PendingScenePool:
+    """LLM 在 propose 阶段判定"不足成卷"的 scene 池。"""
+
+    scene_ids: list[str] = field(default_factory=list)
+    reason: str = ""
+    last_proposed_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PendingScenePool":
+        return cls(
+            scene_ids=list(data.get("scene_ids") or []),
+            reason=data.get("reason", ""),
+            last_proposed_at=data.get("last_proposed_at", ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "scene_ids": list(self.scene_ids),
+            "reason": self.reason,
+            "last_proposed_at": self.last_proposed_at,
+        }
+
+
+@dataclass
 class StoryState:
     characters: dict[str, CharacterStatus] = field(default_factory=dict)
     world: WorldState = field(default_factory=WorldState)
@@ -46,6 +118,11 @@ class StoryState:
     # v3.1: 已入章的场景 id 与章节台账（用于自动续章 / UI 渲染）
     processed_scene_ids: list[str] = field(default_factory=list)
     chapter_index: list[dict] = field(default_factory=list)
+    # v3.2 (PR1b): 卷生命周期、pending 池、campaign 大纲版本追踪
+    current_volume_index: int = 0
+    volumes: list[VolumeRecord] = field(default_factory=list)
+    pending_pool: PendingScenePool | None = None
+    last_campaign_outline_update_sessions: list[str] = field(default_factory=list)
 
 
 def load_state(path: Path) -> StoryState:
@@ -66,6 +143,8 @@ def load_state(path: Path) -> StoryState:
         locations=dict(world_raw.get("locations", {})),
         factions=dict(world_raw.get("factions", {})),
     )
+    pending_raw = raw.get("pending_pool")
+    pending = PendingScenePool.from_dict(pending_raw) if pending_raw else None
     return StoryState(
         characters=chars,
         world=world,
@@ -73,6 +152,12 @@ def load_state(path: Path) -> StoryState:
         session_log=list(raw.get("session_log", [])),
         processed_scene_ids=list(raw.get("processed_scene_ids", [])),
         chapter_index=list(raw.get("chapter_index", [])),
+        current_volume_index=int(raw.get("current_volume_index", 0)),
+        volumes=[VolumeRecord.from_dict(v) for v in (raw.get("volumes") or [])],
+        pending_pool=pending,
+        last_campaign_outline_update_sessions=list(
+            raw.get("last_campaign_outline_update_sessions", [])
+        ),
     )
 
 
@@ -89,6 +174,12 @@ def save_state(state: StoryState, path: Path) -> None:
         "session_log": state.session_log,
         "processed_scene_ids": state.processed_scene_ids,
         "chapter_index": state.chapter_index,
+        "current_volume_index": state.current_volume_index,
+        "volumes": [v.to_dict() for v in state.volumes],
+        "pending_pool": state.pending_pool.to_dict() if state.pending_pool else None,
+        "last_campaign_outline_update_sessions": list(
+            state.last_campaign_outline_update_sessions
+        ),
     }
     path.write_text(
         yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False),

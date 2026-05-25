@@ -1,0 +1,23 @@
+## 现有 campaign 大纲
+{{ campaign_outline_json }}
+
+## 阵容变更（人物卡与大纲的差异）
+{{ roster_changes_json }}
+
+## 新增 session（自上次大纲更新）
+{{ new_sessions }}
+
+{% if narrative_excerpt %}## 新增叙事文本（节选）
+{{ narrative_excerpt }}
+
+{% endif %}## 故事状态
+{{ state_summary }}
+
+## 生成要求
+- 只输出 JSON object。
+- `arc_updates` 仅列出状态/摘要发生变化的 arc；无变化则空列表。
+- `narrative_notes` 列出值得记录的大纲调整（角色弧走向、新情节线、已闭合弧线等）。每条用短句。
+- `new_sessions_summary` 一句话概括新增内容。
+- `roster_impact_narrative` 说明阵容变化对后续卷规划的影响（退团角色的弧线如何收束、新入场角色如何引入主线、角色替换带来的叙事调整等）。
+
+请直接输出 JSON。

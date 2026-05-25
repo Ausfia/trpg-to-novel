@@ -15,17 +15,8 @@ def embed_texts(
     base_url: str,
     model: str,
     batch_size: int = 64,
+    progress_cb = None,
 ) -> list[list[float]]:
-    """对 texts 批量取 embedding。
-
-    Args:
-        texts: 待嵌入文本列表。
-        api_key / base_url / model: 由 KBConfig 提供。
-        batch_size: 每次 API 调用的最大文本数。
-
-    Returns:
-        每条文本对应的浮点向量。顺序保持。
-    """
     if not texts:
         return []
     client = make_client(api_key, base_url)
@@ -34,4 +25,7 @@ def embed_texts(
         batch = texts[i : i + batch_size]
         resp = client.embeddings.create(model=model, input=batch)
         out.extend([item.embedding for item in resp.data])
+        if progress_cb:
+            done = min(i + batch_size, len(texts))
+            progress_cb("embed", done, len(texts))
     return out

@@ -39,16 +39,21 @@ def load_players(path: Path) -> PlayersConfig:
     )
 
 
-def load_session(path: Path, players_cfg: PlayersConfig | None = None) -> SessionConfig:
+def load_session(
+    path: Path,
+    players_cfg: PlayersConfig | None = None,
+) -> SessionConfig:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    # session.player_handles 可以省略——若省则用全局 PC 名单
+
+    # 优先级：session YAML > players_cfg
     player_handles = data.get("player_handles")
     if player_handles is None:
-        if players_cfg is None:
+        if players_cfg is not None:
+            player_handles = players_cfg.pc_names
+        else:
             raise ValueError(
                 f"{path} 未提供 player_handles，需要 players.yaml 兜底"
             )
-        player_handles = players_cfg.pc_names
     return SessionConfig(
         session_id=data["session_id"],
         dm_handle=data["dm_handle"],

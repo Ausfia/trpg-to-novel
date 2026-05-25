@@ -1,0 +1,26 @@
+当前风格方案：
+- 名称：{{ profile.name }}
+- 说明：{{ profile.description }}
+
+用户想要的文风 / 氛围 / 叙事倾向：
+{{ user_brief or profile.user_brief or "（用户未填写，请基于当前方案和参考资料生成一个适合奇幻小说润色的方案。）" }}
+
+当前已有中文风格说明：
+- 总体：{{ profile.style_summary }}
+- 视角：{{ profile.pov_summary }}
+- 文笔：{{ profile.prose_summary }}
+- 对白：{{ profile.dialogue_summary }}
+- 动作：{{ profile.action_summary }}
+- 避免：{{ profile.avoid_summary }}
+
+{% if style_references %}
+风格参考资料片段（只可抽象提炼，不得复刻原文）：
+{% for r in style_references %}
+[{{ loop.index }}] 来源：{{ r.source }}，score={{ "%.3f"|format(r.score) }}
+{{ r.text }}
+{% endfor %}
+{% else %}
+没有可用的风格参考资料。请只根据用户描述和当前方案生成。
+{% endif %}
+
+请生成一个完整、可审查、中文可读的风格方案 JSON。

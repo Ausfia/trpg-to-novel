@@ -1,0 +1,30 @@
+## 当前进度
+- 第 {{ chapter_index }} 章
+- 已累计 {{ accumulated_words }} 字
+
+## 卷信息
+- 卷标题：{{ volume_title }}
+- 卷末策略：{{ ending_strategy }}
+
+## 卷情绪弧线
+{% for e in emotion_arc %}
+- {{ e.position }}：{{ e.label }}（强度 {{ e.intensity }}/10）
+{% endfor %}
+
+## 候选切点
+{% for c in candidates %}
+### 候选 {{ loop.index }}：{{ c.type }}
+- offset: {{ c.offset }}
+{% if c.scene_id %}- scene_id: {{ c.scene_id }}{% endif %}
+附近文本：
+```
+{{ c.nearby_text }}
+```
+{% endfor %}
+
+## 当前章文本预览（结尾部分）
+```
+{{ chapter_text_preview }}
+```
+
+请从上述候选切点中选择最佳切点，输出 JSON。

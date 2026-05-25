@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import struct
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -12,7 +13,6 @@ import sqlite_vec
 
 from trpg2novel.rag.chunker import split_text
 from trpg2novel.rag.config import KBConfig
-from trpg2novel.rag.embedder import embed_texts
 
 
 @dataclass
@@ -31,6 +31,16 @@ def _pack_vec(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
 
 
+def _read_source_text(path: Path) -> str:
+    data = path.read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "cp936", "big5"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+
 class KnowledgeBase:
     """单个 campaign 的世界观知识库。"""
 
@@ -38,7 +48,8 @@ class KnowledgeBase:
         self.db_path = db_path
         self.sources_dir = sources_dir
         self.cfg = cfg
-        self._conn: sqlite3.Connection | None = None
+        # 每个线程独立的连接，彻底避免 SQLite 跨线程并发问题
+        self._local = threading.local()
 
     @classmethod
     def open(cls, kb_dir: Path, cfg: KBConfig) -> "KnowledgeBase":
@@ -50,17 +61,23 @@ class KnowledgeBase:
         return kb
 
     def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path))
-            self._conn.enable_load_extension(True)
-            sqlite_vec.load(self._conn)
-            self._conn.enable_load_extension(False)
-        return self._conn
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            self._local.conn = conn
+        return conn
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
 
     def _ensure_schema(self) -> None:
         conn = self._connect()
@@ -90,8 +107,17 @@ class KnowledgeBase:
     def reset(self) -> None:
         """清空所有 chunk 与向量。"""
         conn = self._connect()
-        conn.execute("DELETE FROM chunks")
+        # DROP + CREATE 远快于 DELETE（百万级行 DELETE 会锁库很久）
+        conn.execute("DROP TABLE IF EXISTS chunks")
         conn.execute("DROP TABLE IF EXISTS vec_chunks")
+        conn.execute(
+            """CREATE TABLE chunks(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                ord INTEGER NOT NULL,
+                text TEXT NOT NULL
+            )"""
+        )
         conn.execute(
             f"CREATE VIRTUAL TABLE vec_chunks USING vec0(embedding float[{self.cfg.dim}])"
         )
@@ -120,62 +146,70 @@ class KnowledgeBase:
         if not self.cfg.is_configured():
             raise RuntimeError("KBConfig 未配置 api_key，无法重建索引。")
 
-        self.reset()
-        conn = self._connect()
+        try:
+            self.reset()
+            conn = self._connect()
 
-        all_chunks: list[tuple[str, int, str]] = []  # (source, ord, text)
-        sources = self.list_sources()
-        for src in sources:
-            text = src.read_text(encoding="utf-8")
-            pieces = split_text(text, size=self.cfg.chunk_size, overlap=self.cfg.chunk_overlap)
-            for i, p in enumerate(pieces):
-                all_chunks.append((src.name, i, p))
+            all_chunks: list[tuple[str, int, str]] = []  # (source, ord, text)
+            sources = self.list_sources()
+            for src in sources:
+                text = _read_source_text(src)
+                pieces = split_text(text, size=self.cfg.chunk_size, overlap=self.cfg.chunk_overlap)
+                for i, p in enumerate(pieces):
+                    all_chunks.append((src.name, i, p))
 
-        if not all_chunks:
-            return {"sources": len(sources), "chunks": 0}
+            if not all_chunks:
+                return {"sources": len(sources), "chunks": 0}
 
-        if progress_cb:
-            progress_cb("chunk", len(all_chunks), len(all_chunks))
+            if progress_cb:
+                progress_cb("chunk", len(all_chunks), len(all_chunks))
 
-        # 嵌入
-        texts = [c[2] for c in all_chunks]
-        if progress_cb:
-            progress_cb("embed", 0, len(texts))
-        vectors = embed_texts(
-            texts,
-            api_key=self.cfg.api_key,
-            base_url=self.cfg.base_url,
-            model=self.cfg.model,
-        )
-        if progress_cb:
-            progress_cb("embed", len(texts), len(texts))
+            # 嵌入
+            from trpg2novel.rag.embedder import embed_texts
 
-        if vectors and len(vectors[0]) != self.cfg.dim:
-            # 自动更新维度并重建 vec 表
-            self.cfg.dim = len(vectors[0])
-            conn.execute("DROP TABLE vec_chunks")
-            conn.execute(
-                f"CREATE VIRTUAL TABLE vec_chunks USING vec0(embedding float[{self.cfg.dim}])"
+            texts = [c[2] for c in all_chunks]
+            if progress_cb:
+                progress_cb("embed", 0, len(texts))
+            vectors = embed_texts(
+                texts,
+                api_key=self.cfg.api_key,
+                base_url=self.cfg.base_url,
+                model=self.cfg.model,
+                progress_cb=progress_cb,
             )
+            if progress_cb:
+                progress_cb("embed", len(texts), len(texts))
 
-        # 入库
-        for i, ((source, ord_, text), vec) in enumerate(zip(all_chunks, vectors), start=1):
-            cur = conn.execute(
-                "INSERT INTO chunks(source, ord, text) VALUES (?, ?, ?)",
-                (source, ord_, text),
-            )
-            chunk_id = cur.lastrowid
-            conn.execute(
-                "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)",
-                (chunk_id, _pack_vec(vec)),
-            )
-            if progress_cb and i % 10 == 0:
-                progress_cb("insert", i, len(all_chunks))
-        conn.commit()
+            if vectors and len(vectors[0]) != self.cfg.dim:
+                # 自动更新维度并重建 vec 表
+                self.cfg.dim = len(vectors[0])
+                conn.execute("DROP TABLE vec_chunks")
+                conn.execute(
+                    f"CREATE VIRTUAL TABLE vec_chunks USING vec0(embedding float[{self.cfg.dim}])"
+                )
 
-        if progress_cb:
-            progress_cb("insert", len(all_chunks), len(all_chunks))
-        return {"sources": len(sources), "chunks": len(all_chunks)}
+            # 入库
+            for i, ((source, ord_, text), vec) in enumerate(zip(all_chunks, vectors), start=1):
+                cur = conn.execute(
+                    "INSERT INTO chunks(source, ord, text) VALUES (?, ?, ?)",
+                    (source, ord_, text),
+                )
+                chunk_id = cur.lastrowid
+                conn.execute(
+                    "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)",
+                    (chunk_id, _pack_vec(vec)),
+                )
+                if progress_cb and i % 10 == 0:
+                    progress_cb("insert", i, len(all_chunks))
+            conn.commit()
+
+            if progress_cb:
+                progress_cb("insert", len(all_chunks), len(all_chunks))
+            return {"sources": len(sources), "chunks": len(all_chunks)}
+        finally:
+            # worker 线程结束前必须显式关掉自己的连接，否则 WAL 写锁会残留，
+            # 主线程后续 DELETE/DROP 会触发 "database is locked"。
+            self.close()
 
     def query(self, query_text: str, top_k: int | None = None) -> list[RetrievedChunk]:
         """检索 top-K 相关片段。"""
@@ -185,6 +219,8 @@ class KnowledgeBase:
         conn = self._connect()
         if self.count_chunks() == 0:
             return []
+
+        from trpg2novel.rag.embedder import embed_texts
 
         vec = embed_texts(
             [query_text],

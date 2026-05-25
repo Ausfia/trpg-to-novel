@@ -44,7 +44,7 @@ with tab_list:
                 st.markdown(f"**{camp.name}**{flag}  `{camp.id}`  —  {camp.system}")
             with cols[1]:
                 if not is_current:
-                    if st.button("切换到此团", key=f"switch_{camp.id}", use_container_width=True):
+                    if st.button("切换到此团", key=f"switch_{camp.id}", width="stretch"):
                         st.session_state["selected_campaign_id"] = camp.id
                         st.rerun()
                 else:
